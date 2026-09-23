@@ -6,6 +6,7 @@ from .files_tab import FilesTabMixin
 from .jupyter_camera_tab import JupyterCameraTabMixin
 from .notebook_tab import NotebookTabMixin
 from .sensor_tab import SensorTabMixin
+from .wifi_tab import WifiTabMixin
 
 __all__ = [
     "BlocksTabMixin",
@@ -16,4 +17,5 @@ __all__ = [
     "JupyterCameraTabMixin",
     "NotebookTabMixin",
     "SensorTabMixin",
+    "WifiTabMixin",
 ]

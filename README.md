@@ -11,6 +11,7 @@ the robot over your network. Tabs:
 - **Live Sensors** -- battery meter, distance sensor, gyro.
 - **Remote Files** -- browse and open the robot's `.py` files.
 - **Jupyter & Camera** -- launch JupyterLab on the robot, watch a live camera stream, take photos.
+- **Wi-Fi** -- scan for networks, save new ones and switch the robot between them.
 
 ## What you need
 
@@ -35,6 +36,8 @@ the robot over your network. Tabs:
   - `picamera2` and a camera module, for the live stream and snapshots
   - SPI enabled and `gcc` installed, for game-controller driving. Without `gcc` it falls back to a
     slower pure-Python driver.
+  - NetworkManager (`nmcli`) and passwordless `sudo` for the SSH user, for the Wi-Fi tab. A fallback
+    hotspot is strongly recommended too; see [Managing the robot's Wi-Fi](#managing-the-robots-wi-fi).
 - **Not tested on a fresh Raspberry Pi 5 install.**
 
 ## Run it on your computer
@@ -62,6 +65,39 @@ All remote paths are relative to the robot user's home folder, so any username w
   folder `~/.gopigo_ide/`.
 - Photos from the Camera Snapshot button are saved on your computer in a `gopigo_photos/` folder
   inside whatever directory you launched the app from.
+
+## Managing the robot's Wi-Fi
+
+The **Wi-Fi** tab runs NetworkManager's `nmcli` on the robot (over your SSH connection) to show its
+saved networks, scan for nearby ones, save a new network, and switch between them.
+
+- **Save Network** only remembers a network; the robot joins it by itself whenever it's in range. New
+  networks get autoconnect priority 5, below a home network at 10 and above a fallback hotspot at 0.
+- **Save & Connect Now** and **Connect** switch the robot immediately. If you're reaching the robot over
+  Wi-Fi, this ends your connection: join the same network on your computer, then click **Connect** at
+  the top again. The robot may have a new address, so try `robot1.local` or check your router.
+- If the robot can't join the new network (wrong password, out of range), it should fall back to
+  its hotspot. This is why a fallback hotspot is recommended: without one, a bad switch can leave
+  the robot unreachable until you reach it another way. A network you just added that fails to
+  connect (typically a wrong password) is removed again.
+- The robot's hotspot profile (any Wi-Fi profile in access-point mode) is shown as such and can't
+  be forgotten from the app, since it's your way back in.
+- While the robot is hosting its hotspot it may be unable to scan for other networks, so the tab
+  doesn't force a rescan then. You can still type a network's name and password and save it.
+- WPA/WPA2 (password), WPA3 and open networks are supported, including hidden ones. Enterprise
+  networks (WPA-Enterprise / 802.1X, and portals that need a browser login, common at schools and
+  cafes) aren't.
+- The Wi-Fi password is passed to `nmcli` as an argument, so it's briefly visible in the robot's
+  process list. It isn't stored by this app; NetworkManager keeps it in a root-only file on the robot.
+
+An example of giving the robot a fallback hotspot with NetworkManager, using your own name and a
+strong password of your choosing (`10.42.0.1` is the address NetworkManager gives the robot on it):
+
+```bash
+sudo nmcli connection add type wifi ifname wlan0 con-name Hotspot autoconnect yes ssid <hotspot-name>
+sudo nmcli connection modify Hotspot 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared \
+    wifi-sec.key-mgmt wpa-psk wifi-sec.psk "<a-strong-password>" connection.autoconnect-priority 0
+```
 
 ## Security notes
 

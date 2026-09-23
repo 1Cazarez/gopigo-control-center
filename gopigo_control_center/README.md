@@ -47,6 +47,7 @@ gopigo_control_center/
 ├── dependencies.py           optional imports (paramiko, pygame)
 ├── remote_scripts.py          scripts deployed onto the robot over SFTP
 ├── block_server.py             local web server behind the Block Builder tab
+├── wifi.py                       nmcli commands + parsing for the Wi-Fi tab (no Tk, easy to test)
 ├── requirements.txt
 ├── web/                          Block Builder page + vendored Blockly (with its LICENSE)
 └── tabs/
@@ -57,7 +58,8 @@ gopigo_control_center/
     ├── controller_tab.py         Controller (C motor driver)
     ├── sensor_tab.py               Live Sensors
     ├── files_tab.py                 Remote Files
-    └── jupyter_camera_tab.py         Jupyter & Camera
+    ├── jupyter_camera_tab.py         Jupyter & Camera
+    └── wifi_tab.py                     Wi-Fi
 ```
 
 Each tab is a small mixin class; `GoPiGoApp` in `app.py` combines all of
@@ -75,6 +77,15 @@ generated Python is written to `block_builder_output.py` in the robot user's hom
 Since that server can run code on the robot, it only listens on `127.0.0.1` (this computer) on a
 random port, and it rejects any request that doesn't carry the random per-session key from the link
 the app opens -- including requests from other websites open in your browser.
+
+## The Wi-Fi tab
+
+`wifi.py` builds the `sudo nmcli ...` command lines (every argument shell-quoted), runs them over
+SSH, and parses the output; `tabs/wifi_tab.py` is the Tk side. Saved networks are identified by
+UUID rather than name, so odd characters in a network name can't confuse a command. A saved Wi-Fi
+profile in access-point mode is treated as the robot's fallback hotspot and is protected from
+deletion. See the [top-level README](../README.md#managing-the-robots-wi-fi) for how switching
+networks behaves and what the robot needs.
 
 ## The C motor driver
 

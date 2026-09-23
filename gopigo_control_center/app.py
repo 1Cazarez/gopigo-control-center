@@ -17,6 +17,7 @@ from tabs import (
     JupyterCameraTabMixin,
     NotebookTabMixin,
     SensorTabMixin,
+    WifiTabMixin,
 )
 from theme import BAR_BG, init_style, style_button
 
@@ -30,6 +31,7 @@ class GoPiGoApp(
     SensorTabMixin,
     FilesTabMixin,
     JupyterCameraTabMixin,
+    WifiTabMixin,
 ):
     def __init__(self, root):
         self.root = root
@@ -241,6 +243,7 @@ class GoPiGoApp(
         self.sensor_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.files_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.jupyter_camera_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.wifi_tab = ttk.Frame(self.notebook, style="Card.TFrame")
 
         self.notebook.add(self.code_tab, text="Code Editor & Run")
         self.notebook.add(self.notebook_cells_tab, text="Notebook Cells")
@@ -250,6 +253,7 @@ class GoPiGoApp(
         self.notebook.add(self.sensor_tab, text="Live Sensors")
         self.notebook.add(self.files_tab, text="Remote Files")
         self.notebook.add(self.jupyter_camera_tab, text="Jupyter & Camera")
+        self.notebook.add(self.wifi_tab, text="Wi-Fi")
 
         self._build_code_tab()
         self._build_notebook_cells_tab()
@@ -259,6 +263,7 @@ class GoPiGoApp(
         self._build_sensor_tab()
         self._build_files_tab()
         self._build_jupyter_camera_tab()
+        self._build_wifi_tab()
 
     # ---------------- Status bar ----------------
     def _build_status_bar(self):
