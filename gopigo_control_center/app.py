@@ -4,6 +4,7 @@ plus the connection bar and status bar shared by all of them.
 
 import threading
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
 from constants import DEFAULT_TEMPLATE
@@ -19,7 +20,21 @@ from tabs import (
     SensorTabMixin,
     WifiTabMixin,
 )
-from theme import BAR_BG, init_style, style_button
+from theme import BAR_BG, FONT_BASE, init_style, style_button
+
+# Window size for text of normal size. Some setups (for example Tk on XWayland) render text about twice
+# as large as requested, which would clip most tabs at a fixed size, so the window grows with the text.
+BASE_WIDTH, BASE_HEIGHT = 1040, 780
+NORMAL_LINE_HEIGHT = 18  # px: a 10pt UI font on an ordinary 96-DPI screen
+
+
+def initial_geometry(root):
+    """A window size that suits how large text really renders here, without overflowing the screen."""
+    line_height = tkfont.Font(root=root, font=FONT_BASE).metrics("linespace")
+    scale = max(1.0, line_height / NORMAL_LINE_HEIGHT)
+    width = min(int(BASE_WIDTH * scale), root.winfo_screenwidth() - 100)
+    height = min(int(BASE_HEIGHT * scale), root.winfo_screenheight() - 140)
+    return f"{max(width, 640)}x{max(height, 480)}"
 
 
 class GoPiGoApp(
@@ -36,7 +51,7 @@ class GoPiGoApp(
     def __init__(self, root):
         self.root = root
         self.root.title("GoPiGo Control Center")
-        self.root.geometry("1040x780")
+        self.root.geometry(initial_geometry(root))
         init_style(root)
 
         self.ssh_client = None
