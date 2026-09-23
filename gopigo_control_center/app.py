@@ -3,6 +3,7 @@ plus the connection bar and status bar shared by all of them.
 """
 
 import threading
+import time
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import messagebox, ttk
@@ -26,6 +27,13 @@ from theme import BAR_BG, FONT_BASE, init_style, style_button
 # as large as requested, which would clip most tabs at a fixed size, so the window grows with the text.
 BASE_WIDTH, BASE_HEIGHT = 1040, 780
 NORMAL_LINE_HEIGHT = 18  # px: a 10pt UI font on an ordinary 96-DPI screen
+
+# Connection watchdog: every WATCH_INTERVAL seconds, ask the robot to open a channel. If that fails
+# WATCH_MISSES times in a row (or the link is already closed), the connection is declared lost.
+WATCH_INTERVAL = 5
+WATCH_PING_TIMEOUT = 10
+WATCH_MISSES = 2
+KEEPALIVE_SECONDS = 20
 
 
 def initial_geometry(root):
@@ -76,10 +84,12 @@ class GoPiGoApp(
         # JupyterLab launch state
         self.jupyter_channel = None
         self.jupyter_url = None
+        self.jupyter_stopping = False  # True once the user asked to stop, so an exit isn't reported as a failure
 
         # Camera streaming state
         self.camera_channel = None
         self.camera_url = None
+        self.camera_stopping = False
         self.last_photo_path = None
 
         if pygame is not None:
@@ -168,6 +178,7 @@ class GoPiGoApp(
                 client = paramiko.SSHClient()
                 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 client.connect(host, username=user, password=password, timeout=10)
+                client.get_transport().set_keepalive(KEEPALIVE_SECONDS)  # also keeps Wi-Fi routers from dropping an idle link
                 self.ssh_client = client
                 self.root.after(0, self._on_connected)
             except Exception as e:
@@ -183,6 +194,7 @@ class GoPiGoApp(
         style_button(self.connect_btn, "danger")
         self._set_status("Connected to robot.")
         self.refresh_file_list()
+        self._start_connection_watch()
 
     def _on_connect_failed(self, err):
         self.conn_status_var.set("Not connected")
@@ -190,7 +202,50 @@ class GoPiGoApp(
         messagebox.showerror("Connection error", err)
         self._set_status(f"Connection failed: {err}")
 
+    def _start_connection_watch(self):
+        """Notice when the link to the robot dies or stalls, and say so.
+
+        Without this, a dropped connection leaves the top bar saying "Connected" while every button
+        quietly fails, and nothing tells you to reconnect.
+        """
+        client = self.ssh_client
+
+        def watch():
+            misses = 0
+            while self.ssh_client is client and client is not None:
+                time.sleep(WATCH_INTERVAL)
+                if self.ssh_client is not client:
+                    return
+                transport = client.get_transport()
+                alive = transport is not None and transport.is_active()
+                if alive:
+                    try:
+                        transport.open_session(timeout=WATCH_PING_TIMEOUT).close()  # a real round trip to the robot
+                        misses = 0
+                    except Exception:
+                        misses += 1
+                        alive = misses < WATCH_MISSES
+                if not alive:
+                    self.root.after(0, lambda: self._connection_lost(client))
+                    return
+
+        threading.Thread(target=watch, daemon=True).start()
+
+    def _connection_lost(self, client):
+        if self.ssh_client is not client:  # already disconnected some other way
+            return
+        self._disconnect()
+        self.conn_status_var.set("Connection lost")
+        self._set_status("Lost the connection to the robot. Click Connect to reconnect.")
+        messagebox.showwarning(
+            "Connection lost",
+            "The connection to the robot was lost. It may have gone out of range or rebooted, or its Wi-Fi "
+            "may be overloaded (a live camera stream uses a lot of bandwidth).\n\nClick Connect to reconnect.",
+        )
+
     def _disconnect(self):
+        self.jupyter_stopping = True  # closing these channels below is on purpose, not a failure to report
+        self.camera_stopping = True
         self.sensor_polling = False
         self.controller_active = False
         try:
@@ -229,14 +284,13 @@ class GoPiGoApp(
         self.conn_status_label.config(fg="#e0473b")
         self.connect_btn.config(text="Connect")
         style_button(self.connect_btn, "success")
-        if hasattr(self, "kernel_status_var"):
-            self.kernel_status_var.set("Kernel: not running")
-        if hasattr(self, "jupyter_status_var"):
-            self.jupyter_status_var.set("Jupyter: not running")
-        if hasattr(self, "camera_status_var"):
-            self.camera_status_var.set("Camera stream: not running")
-        if hasattr(self, "battery_meter"):
-            self.battery_meter.set_voltage(None)
+        # Put every start/stop button back to "Start", so nothing reads "Stop" for a service that's gone.
+        self.kernel_status_var.set("Kernel: not running")
+        self._on_jupyter_stopped()
+        self._on_camera_stopped()
+        self.poll_btn.config(text="Start Live Sensors", bg="#2ea36f")
+        self.controller_toggle_btn.config(text="Start Controller Mode", bg="#2ea36f")
+        self.battery_meter.set_voltage(None)
         self._set_status("Disconnected.")
 
     def _require_connection(self):

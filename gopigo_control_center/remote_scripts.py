@@ -389,9 +389,10 @@ picam2.set_controls({"ScalerCrop": (0, 0) + picam2.camera_properties["PixelArray
 picam2.start_recording(JpegEncoder(), FileOutput(output))
 
 try:
-    print("CAMERA_STREAM_READY", flush=True)
     address = ("", 8000)
     server_obj = StreamingServer(address, StreamingHandler)
+    # Only announce "ready" once the port is bound, so a browser opened right away can connect.
+    print("CAMERA_STREAM_READY", flush=True)
     server_obj.serve_forever()
 finally:
     picam2.stop_recording()

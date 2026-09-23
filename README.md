@@ -66,6 +66,13 @@ All remote paths are relative to the robot user's home folder, so any username w
 - Photos from the Camera Snapshot button are saved on your computer in a `gopigo_photos/` folder
   inside whatever directory you launched the app from.
 
+### If the connection to the robot drops
+
+The app checks the link every few seconds. If the robot goes out of range, reboots, or its Wi-Fi gets
+overloaded (a live camera stream uses a lot of bandwidth), the top bar changes to **Connection lost**
+and a dialog says so; click **Connect** to reconnect. If JupyterLab or the camera stream fails to start,
+or stops by itself, a dialog shows the robot's own error message.
+
 ## Managing the robot's Wi-Fi
 
 The **Wi-Fi** tab runs NetworkManager's `nmcli` on the robot (over your SSH connection) to show its

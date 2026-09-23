@@ -9,7 +9,7 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from constants import VENV_ACTIVATE, login_shell
 from remote_scripts import (
@@ -21,6 +21,10 @@ from remote_scripts import (
     REMOTE_KERNEL_DIR,
 )
 from theme import divider, style_button
+
+# How long to wait for the robot to open a channel before giving up. Without a limit, a stalled
+# connection would leave the Start button disabled forever.
+OPEN_TIMEOUT = 15
 
 
 class JupyterCameraTabMixin:
@@ -123,11 +127,12 @@ class JupyterCameraTabMixin:
 
         self.jupyter_status_var.set("Jupyter: starting...")
         self.jupyter_toggle_btn.config(state="disabled")
+        self.jupyter_stopping = False
         host = self.host_var.get().strip()
 
         def worker():
             try:
-                channel = self.ssh_client.get_transport().open_session()
+                channel = self.ssh_client.get_transport().open_session(timeout=OPEN_TIMEOUT)
                 # Jupyter logs its startup lines -- including the token URL --
                 # to stderr, not stdout. Combine the two so recv() sees it.
                 channel.set_combine_stderr(True)
@@ -171,7 +176,12 @@ class JupyterCameraTabMixin:
                             self.jupyter_url = url
                             self.root.after(0, lambda: self._on_jupyter_ready(url))
                 elif channel.exit_status_ready():
-                    self.root.after(0, self._on_jupyter_stopped)
+                    if self.jupyter_stopping:
+                        self.root.after(0, self._on_jupyter_stopped)
+                    else:  # it ended without us asking: tell the user why
+                        exit_code = channel.recv_exit_status()
+                        output = "\n".join(buffer.strip().splitlines()[-8:])  # the last few whole lines
+                        self.root.after(0, lambda: self._on_jupyter_died(exit_code, output, found_token))
                     break
                 else:
                     time.sleep(0.1)
@@ -192,6 +202,14 @@ class JupyterCameraTabMixin:
         self.jupyter_open_btn.config(state="normal")
         self._set_status("Jupyter Lab is up.")
 
+    def _on_jupyter_died(self, exit_code, output, was_running):
+        self._on_jupyter_stopped()
+        what = "JupyterLab stopped on its own." if was_running else "JupyterLab didn't start."
+        code = f" (exit code {exit_code})" if exit_code >= 0 else ""
+        detail = output or "No output -- is jupyter installed in the robot's ~/.venv/gopigo3?"
+        self.jupyter_status_var.set("Jupyter: stopped unexpectedly" if was_running else "Jupyter: failed to start")
+        messagebox.showerror("JupyterLab", f"{what}{code}\n\nLast output from the robot:\n{detail}")
+
     def _on_jupyter_stopped(self):
         self.jupyter_channel = None
         self.jupyter_url = None
@@ -201,6 +219,8 @@ class JupyterCameraTabMixin:
         self.jupyter_toggle_btn.config(text="Start Jupyter Lab", bg="#2ea36f", state="normal")
 
     def stop_jupyter(self):
+        self.jupyter_stopping = True  # so the reader loop knows this exit was requested
+
         def worker():
             try:
                 if self.jupyter_channel:
@@ -230,6 +250,7 @@ class JupyterCameraTabMixin:
 
         self.camera_status_var.set("Camera stream: starting...")
         self.camera_toggle_btn.config(state="disabled")
+        self.camera_stopping = False
         host = self.host_var.get().strip()
 
         def worker():
@@ -243,7 +264,9 @@ class JupyterCameraTabMixin:
                     f.write(CAMERA_STREAM_SCRIPT)
                 sftp.close()
 
-                channel = self.ssh_client.get_transport().open_session()
+                channel = self.ssh_client.get_transport().open_session(timeout=OPEN_TIMEOUT)
+                # Errors (a missing camera, a busy camera) go to stderr: combine it so we can show them.
+                channel.set_combine_stderr(True)
                 command = f"{VENV_ACTIVATE} && python3 -u {REMOTE_CAMERA_STREAM_PATH}"
                 channel.exec_command(login_shell(command))
                 self.camera_channel = channel
@@ -276,13 +299,26 @@ class JupyterCameraTabMixin:
                         found_ready = True
                         self.root.after(0, lambda: self._on_camera_ready(url))
                 elif channel.exit_status_ready():
-                    self.root.after(0, self._on_camera_stopped)
+                    if self.camera_stopping:
+                        self.root.after(0, self._on_camera_stopped)
+                    else:  # it ended without us asking: tell the user why
+                        exit_code = channel.recv_exit_status()
+                        output = "\n".join(buffer.replace("CAMERA_STREAM_READY", "").strip().splitlines()[-8:])
+                        self.root.after(0, lambda: self._on_camera_died(exit_code, output, found_ready))
                     break
                 else:
                     time.sleep(0.1)
             except Exception:
                 self.root.after(0, self._on_camera_stopped)
                 break
+
+    def _on_camera_died(self, exit_code, output, was_running):
+        self._on_camera_stopped()
+        what = "The camera stream stopped on its own." if was_running else "The camera stream didn't start."
+        code = f" (exit code {exit_code})" if exit_code >= 0 else ""
+        detail = output or "No output -- is picamera2 installed in the robot's ~/.venv/gopigo3, and is the camera connected?"
+        self.camera_status_var.set("Camera stream: stopped unexpectedly" if was_running else "Camera stream: failed to start")
+        messagebox.showerror("Camera stream", f"{what}{code}\n\nLast output from the robot:\n{detail}")
 
     def _on_camera_ready(self, url):
         self.camera_status_var.set("Camera stream: running")
@@ -299,6 +335,8 @@ class JupyterCameraTabMixin:
         self.camera_toggle_btn.config(text="Start Camera Stream", bg="#2ea36f", state="normal")
 
     def stop_camera_stream(self):
+        self.camera_stopping = True  # so the reader loop knows this exit was requested
+
         def worker():
             try:
                 if self.camera_channel:
@@ -346,7 +384,10 @@ class JupyterCameraTabMixin:
                 exit_status = stdout.channel.recv_exit_status()
                 if exit_status != 0:
                     err = stderr.read().decode(errors="replace").strip()
-                    raise RuntimeError(err or "camera capture failed -- is the live stream still running?")
+                    reason = err.splitlines()[-1] if err else "camera capture failed"  # the traceback's last line
+                    if self.camera_channel is not None:
+                        reason += " -- the live stream is using the camera, so stop it first"
+                    raise RuntimeError(reason)
 
                 local_dir = os.path.join(os.getcwd(), "gopigo_photos")
                 os.makedirs(local_dir, exist_ok=True)
