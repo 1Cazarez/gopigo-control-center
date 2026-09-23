@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Photos saved by the Camera Snapshot button (written to the working directory)
+gopigo_photos/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

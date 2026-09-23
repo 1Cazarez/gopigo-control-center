@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>GoPiGo Block Builder</title>
+  <script src="blockly/blockly_compressed.js"></script>
+  <script src="blockly/blocks_compressed.js"></script>
+  <script src="blockly/en.js"></script>
+  <script src="blockly/python_compressed.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: sans-serif; background: #1c1f24; color: #eee; }
+    #topbar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #2b2f36; flex-wrap: wrap; }
+    #topbar button { padding: 7px 14px; border: none; border-radius: 5px; color: white; cursor: pointer; font-weight: bold; }
+    #sendBtn { background: #4a7; }
+    #runBtn { background: #47a; }
+    #stopBtn { background: #a44; }
+    #conn { font-size: 13px; color: #e0473b; }
+    #conn.ok { color: #3ddc84; }
+    #status { margin-left: auto; font-size: 13px; color: #aaa; }
+    .blocklyToolboxCategoryLabel { color: #2b2f36; }  /* page text is light; the toolbox background is too */
+    #main { display: flex; height: calc(100% - 56px); }
+    #blocklyDiv { flex: 3; height: 100%; }
+    #sidePanel { flex: 2; display: flex; flex-direction: column; border-left: 2px solid #333; }
+    #codePreview { flex: 1; background: #111; color: #7f7; font-family: Consolas, monospace; font-size: 12.5px;
+                   padding: 10px; overflow: auto; white-space: pre; border-bottom: 2px solid #333; }
+    #output { flex: 1; background: #000; color: #0f0; font-family: Consolas, monospace; font-size: 12.5px;
+              padding: 10px; overflow: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+
+  <div id="topbar">
+    <button id="sendBtn" onclick="doSend()">Send to Robot</button>
+    <button id="runBtn" onclick="doSendAndRun()">Send &amp; Run</button>
+    <button id="stopBtn" onclick="doStop()">Stop</button>
+    <span id="conn">Checking robot connection...</span>
+    <span id="status"></span>
+  </div>
+
+  <div id="main">
+    <div id="blocklyDiv"></div>
+    <div id="sidePanel">
+      <div id="codePreview">-- generated Python will appear here --</div>
+      <div id="output">-- robot output will appear here --</div>
+    </div>
+  </div>
+
+  <xml id="toolbox" style="display: none">
+    <category name="GoPiGo" colour="#4a7">
+      <block type="gopigo_forward"></block>
+      <block type="gopigo_backward"></block>
+      <block type="gopigo_drive_cm"></block>
+      <block type="gopigo_turn_degrees"></block>
+      <block type="gopigo_left"></block>
+      <block type="gopigo_right"></block>
+      <block type="gopigo_stop"></block>
+      <block type="gopigo_set_speed"></block>
+    </category>
+    <category name="Timing" colour="#a74">
+      <block type="gopigo_wait"></block>
+    </category>
+    <category name="Loops" colour="#5c8">
+      <block type="controls_repeat_ext">
+        <value name="TIMES">
+          <shadow type="math_number">
+            <field name="NUM">4</field>
+          </shadow>
+        </value>
+      </block>
+      <block type="controls_whileUntil"></block>
+    </category>
+    <category name="Output" colour="#77a">
+      <block type="gopigo_print"></block>
+    </category>
+  </xml>
+
+  <script>
+    // ---------- Custom GoPiGo blocks ----------
+    Blockly.Blocks['gopigo_forward'] = {
+      init: function () {
+        this.appendDummyInput().appendField('drive forward (continuous)');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#4a7');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_forward'] = () => 'gpg.forward()\n';
+
+    Blockly.Blocks['gopigo_backward'] = {
+      init: function () {
+        this.appendDummyInput().appendField('drive backward (continuous)');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#4a7');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_backward'] = () => 'gpg.backward()\n';
+
+    Blockly.Blocks['gopigo_drive_cm'] = {
+      init: function () {
+        this.appendDummyInput()
+          .appendField('drive')
+          .appendField(new Blockly.FieldNumber(10), 'CM')
+          .appendField('cm (negative = backward)');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#4a7');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_drive_cm'] = (block) => {
+      const cm = block.getFieldValue('CM');
+      return `gpg.drive_cm(${cm})\n`;
+    };
+
+    Blockly.Blocks['gopigo_turn_degrees'] = {
+      init: function () {
+        this.appendDummyInput()
+          .appendField('turn')
+          .appendField(new Blockly.FieldNumber(90), 'DEG')
+          .appendField('degrees (negative = left)');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#4a7');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_turn_degrees'] = (block) => {
+      const deg = block.getFieldValue('DEG');
+      return `gpg.turn_degrees(${deg})\n`;
+    };
+
+    Blockly.Blocks['gopigo_left'] = {
+      init: function () {
+        this.appendDummyInput().appendField('turn left (continuous)');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#4a7');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_left'] = () => 'gpg.left()\n';
+
+    Blockly.Blocks['gopigo_right'] = {
+      init: function () {
+        this.appendDummyInput().appendField('turn right (continuous)');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#4a7');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_right'] = () => 'gpg.right()\n';
+
+    Blockly.Blocks['gopigo_stop'] = {
+      init: function () {
+        this.appendDummyInput().appendField('stop');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#a44');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_stop'] = () => 'gpg.stop()\n';
+
+    Blockly.Blocks['gopigo_set_speed'] = {
+      init: function () {
+        this.appendDummyInput()
+          .appendField('set speed to')
+          .appendField(new Blockly.FieldNumber(200, 50, 500), 'SPEED')
+          .appendField('deg/sec');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#4a7');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_set_speed'] = (block) => {
+      const speed = block.getFieldValue('SPEED');
+      return `gpg.set_speed(${speed})\n`;
+    };
+
+    Blockly.Blocks['gopigo_wait'] = {
+      init: function () {
+        this.appendDummyInput()
+          .appendField('wait')
+          .appendField(new Blockly.FieldNumber(1, 0), 'SECONDS')
+          .appendField('seconds');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#a74');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_wait'] = (block) => {
+      const secs = block.getFieldValue('SECONDS');
+      return `time.sleep(${secs})\n`;
+    };
+
+    Blockly.Blocks['gopigo_print'] = {
+      init: function () {
+        this.appendDummyInput()
+          .appendField('print')
+          .appendField(new Blockly.FieldTextInput('hello'), 'TEXT');
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour('#77a');
+      }
+    };
+    Blockly.Python.forBlock['gopigo_print'] = (block) => {
+      const text = block.getFieldValue('TEXT').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      return `print("${text}")\n`;
+    };
+
+    // ---------- Workspace setup ----------
+    const workspace = Blockly.inject('blocklyDiv', {
+      toolbox: document.getElementById('toolbox'),
+      trashcan: true,
+      zoom: { controls: true, wheel: true },
+      grid: { spacing: 20, length: 3, colour: '#333', snap: true }
+    });
+
+    function generateCode() {
+      const body = Blockly.Python.workspaceToCode(workspace);
+      const code = 'import easygopigo3 as easy\nimport time\n\ngpg = easy.EasyGoPiGo3()\n\n' + body;
+      document.getElementById('codePreview').textContent = code;
+      return code;
+    }
+
+    workspace.addChangeListener(() => generateCode());
+    generateCode();
+
+    function setStatus(text) {
+      document.getElementById('status').textContent = text;
+    }
+    function setOutput(text) {
+      document.getElementById('output').textContent = text;
+    }
+
+    // ---------- Calls back into the GoPiGo Control Center ----------
+    // The Control Center serves this page and owns the robot connection.
+    // TOKEN is filled in by it when the page is served; every call must send it.
+    const TOKEN = '__TOKEN__';
+    history.replaceState(null, '', location.pathname);  // keep the session key out of the address bar
+
+    async function callControlCenter(path, code) {
+      const options = { headers: { 'X-GoPiGo-Token': TOKEN } };
+      if (code !== undefined) {
+        options.method = 'POST';
+        options.headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify({ code });
+      }
+      try {
+        const response = await fetch(path, options);
+        return await response.json();
+      } catch (e) {
+        return { ok: false, message: 'Lost contact with the Control Center (is it still running?)', output: '' };
+      }
+    }
+
+    async function refreshConnection() {
+      const result = await callControlCenter('/api/status');
+      const el = document.getElementById('conn');
+      const connected = result.connected === true;
+      el.textContent = connected ? 'Robot connected' : 'Not connected - connect in the Control Center';
+      el.className = connected ? 'ok' : '';
+    }
+    refreshConnection();
+    setInterval(refreshConnection, 3000);
+
+    async function doSend() {
+      const code = generateCode();
+      setStatus('Sending...');
+      const result = await callControlCenter('/api/send', code);
+      setStatus(result.message);
+    }
+
+    async function doSendAndRun() {
+      const code = generateCode();
+      setStatus('Sending & running...');
+      setOutput('Running...');
+      const result = await callControlCenter('/api/run', code);
+      setStatus(result.message);
+      setOutput(result.output || result.message);
+    }
+
+    async function doStop() {
+      const result = await callControlCenter('/api/stop', '');
+      setStatus(result.message);
+    }
+  </script>
+</body>
+</html>
