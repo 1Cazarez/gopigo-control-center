@@ -209,7 +209,8 @@ class ControllerTabMixin:
 
                 threading.Thread(target=self._controller_loop, args=(joystick_index,), daemon=True).start()
             except Exception as e:
-                self.root.after(0, lambda: self.controller_status_var.set(f"Error: {e}"))
+                error = str(e)
+                self.root.after(0, lambda: self.controller_status_var.set(f"Error: {error}"))
 
         threading.Thread(target=worker, daemon=True).start()
 

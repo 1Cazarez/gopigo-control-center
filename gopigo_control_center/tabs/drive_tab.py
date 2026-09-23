@@ -68,7 +68,8 @@ class DriveTabMixin:
                 self.ssh_client.exec_command(login_shell(command))
                 self.root.after(0, lambda: self.drive_status_var.set(f"Sent: {gpg_call}"))
             except Exception as e:
-                self.root.after(0, lambda: self.drive_status_var.set(f"Error: {e}"))
+                error = str(e)
+                self.root.after(0, lambda: self.drive_status_var.set(f"Error: {error}"))
 
         threading.Thread(target=worker, daemon=True).start()
 

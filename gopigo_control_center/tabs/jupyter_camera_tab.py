@@ -142,8 +142,9 @@ class JupyterCameraTabMixin:
                 )
                 threading.Thread(target=self._jupyter_reader_loop, args=(host,), daemon=True).start()
             except Exception as e:
+                error = str(e)
                 self.jupyter_channel = None
-                self.root.after(0, lambda: self.jupyter_status_var.set(f"Error: {e}"))
+                self.root.after(0, lambda: self.jupyter_status_var.set(f"Error: {error}"))
                 self.root.after(0, lambda: self.jupyter_toggle_btn.config(state="normal"))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -255,8 +256,9 @@ class JupyterCameraTabMixin:
                     0, lambda: self.camera_toggle_btn.config(text="Stop Camera Stream", bg="#e0473b", state="normal")
                 )
             except Exception as e:
+                error = str(e)
                 self.camera_channel = None
-                self.root.after(0, lambda: self.camera_status_var.set(f"Error: {e}"))
+                self.root.after(0, lambda: self.camera_status_var.set(f"Error: {error}"))
                 self.root.after(0, lambda: self.camera_toggle_btn.config(state="normal"))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -358,7 +360,8 @@ class JupyterCameraTabMixin:
                 self.last_photo_path = local_path
                 self.root.after(0, lambda: self._on_photo_ready(local_path))
             except Exception as e:
-                self.root.after(0, lambda: self._on_photo_failed(str(e)))
+                error = str(e)
+                self.root.after(0, lambda: self._on_photo_failed(error))
 
         threading.Thread(target=worker, daemon=True).start()
 

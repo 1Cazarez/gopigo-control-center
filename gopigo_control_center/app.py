@@ -154,7 +154,8 @@ class GoPiGoApp(
                 self.ssh_client = client
                 self.root.after(0, self._on_connected)
             except Exception as e:
-                self.root.after(0, lambda: self._on_connect_failed(str(e)))
+                error = str(e)  # `e` is deleted when this block ends, before the lambda runs
+                self.root.after(0, lambda: self._on_connect_failed(error))
 
         threading.Thread(target=worker, daemon=True).start()
 
