@@ -434,6 +434,12 @@ class DashboardTabMixin:
         self.drive_btn.config(text="Stop Driving", state="normal")
         style_button(self.drive_btn, "danger", big=True)
         self.controller_status_var.set(f"Driving ({driver}).")
+        # Driving goes with seeing where you're going: start the camera and sensors too, unless they're
+        # already running or starting.
+        if self.camera_channel is None and "starting" not in self.camera_status_var.get():
+            self.toggle_camera_stream()
+        if self.telemetry_channel is None:
+            self.toggle_sensors()
 
     def _on_driving_failed(self, error):
         self.drive_starting = False

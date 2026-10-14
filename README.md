@@ -6,7 +6,7 @@ the robot over your network. Tabs:
 - **Dashboard** -- the control center: the live camera picture, battery, distance sensor, IMU
   (compass, roll, pitch, gyro) and wheel encoders, and a game controller drawn on screen showing
   what you press. Drive with a Nintendo Switch Pro Controller (or Joy-Con, or another gamepad) using
-  racing controls: **ZR** gas, **ZL** brake/reverse, **left stick** steers (while moving, like a car),
+  racing controls (**Start Driving** also starts the camera and sensors): **ZR** gas, **ZL** brake/reverse, **left stick** steers (while moving, like a car),
   hold **L**/**R** to spin on the spot, and the **right stick** up/down raises or lowers the top speed.
   Choose what the other buttons do -- blinkers, hazard lights, eye colors (X steps through them, then
   off), camera and more -- in **Controller Settings**; a legend on the Dashboard lists what every

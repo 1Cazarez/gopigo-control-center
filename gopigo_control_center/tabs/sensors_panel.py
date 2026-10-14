@@ -122,6 +122,7 @@ class SensorsMixin:
         if not hasattr(self, "sensor_panels"):
             self.sensor_panels = []
             self.telemetry_channel = None
+            self.telemetry_starting = False
         panel = SensorPanel(parent, self, title)
         self.sensor_panels.append(panel)
         return panel.frame
@@ -130,8 +131,9 @@ class SensorsMixin:
         if self.telemetry_channel is not None:
             self._stop_telemetry("Sensors off.")
             return
-        if not self._require_connection():
+        if self.telemetry_starting or not self._require_connection():
             return
+        self.telemetry_starting = True
         for panel in self.sensor_panels:
             panel.set_running(False, starting=True)
             panel.status_var.set("Starting the sensor reader on the robot...")
@@ -149,10 +151,12 @@ class SensorsMixin:
                 channel = self.ssh_client.get_transport().open_session(timeout=OPEN_TIMEOUT)
                 channel.exec_command(login_shell(f"{VENV_ACTIVATE} && python3 -u {REMOTE_TELEMETRY_PATH}"))
                 self.telemetry_channel = channel
+                self.telemetry_starting = False
                 self.root.after(0, self._on_telemetry_started)
                 self._telemetry_loop(channel)
             except Exception as e:
                 error = str(e)
+                self.telemetry_starting = False
                 self.root.after(0, lambda: self._stop_telemetry(f"Couldn't start the sensors: {error}"))
 
         threading.Thread(target=worker, daemon=True).start()
