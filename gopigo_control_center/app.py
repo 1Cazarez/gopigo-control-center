@@ -162,16 +162,16 @@ class GoPiGoApp(
         self.conn_status_label.grid(row=0, column=9, padx=6)
 
         # Window buttons at the far right: full screen (GNOME's title bar has no maximize button by default)
-        # and quit, which matters in full screen, where the title bar and its close button are hidden.
+        # and, in full screen only, quit -- the title bar and its close button are hidden then.
         frame.columnconfigure(10, weight=1)
         window_opts = dict(bg=BAR_BG, fg="#c9d0da", relief="flat", bd=0, padx=8, pady=0, cursor="hand2",
                            font=("DejaVu Sans", 13), highlightthickness=0, activeforeground="#ffffff")
         self.fullscreen_btn = tk.Button(frame, text=FULLSCREEN_ON, command=self.toggle_fullscreen,
                                         activebackground="#3a4657", **window_opts)
         self.fullscreen_btn.grid(row=0, column=11, sticky="e")
-        tk.Button(frame, text="✕", command=self.quit_app, activebackground=DANGER, **window_opts).grid(
-            row=0, column=12, sticky="e", padx=(2, 0)
-        )
+        self.quit_btn = tk.Button(frame, text="✕", command=self.quit_app, activebackground=DANGER, **window_opts)
+        self.quit_btn.grid(row=0, column=12, sticky="e", padx=(2, 0))
+        self.quit_btn.grid_remove()  # shown only in full screen
         self.root.bind("<F11>", lambda e: self.toggle_fullscreen())
         self.root.bind("<Escape>", lambda e: self.set_fullscreen(False) if self.is_fullscreen() else None)
         self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
@@ -190,6 +190,10 @@ class GoPiGoApp(
         """Fill the whole screen, or go back to a normal window. Remembered for next time."""
         self.root.attributes("-fullscreen", on)
         self.fullscreen_btn.config(text=FULLSCREEN_OFF if on else FULLSCREEN_ON)
+        if on:
+            self.quit_btn.grid()
+        else:
+            self.quit_btn.grid_remove()
         if self.settings["fullscreen"] != on:
             self.settings["fullscreen"] = on
             user_settings.save(self.settings)

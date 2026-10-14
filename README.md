@@ -85,7 +85,8 @@ python3 gopigo_control_center/main.py
 
 Enter the robot's host, username and password at the top of the window and click **Connect**.
 The **□** button at the top right (or F11; Esc leaves it) fills the screen, and the app reopens the way
-you left it; **✕** next to it quits, disconnecting first so everything on the robot stops. Tick
+you left it. In full screen, where the title bar is hidden, **✕** next to it quits, disconnecting first
+so everything on the robot stops. Tick
 **Remember** to have the app fill them in next time: the host and username go in the settings file, and
 the password in your system's password store (GNOME Keyring or KWallet, Windows Credential Manager, the
 macOS Keychain) through the `keyring` library -- never in a file. Unticking it deletes the stored password. If you
