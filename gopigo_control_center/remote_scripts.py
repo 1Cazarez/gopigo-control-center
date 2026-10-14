@@ -631,8 +631,12 @@ class Camera:
             self.np = np
             self.encode = self._encoder()
             self.cam = Picamera2()
-            self.cam.configure(self.cam.create_preview_configuration(main={"size": FRAME_SIZE, "format": "RGB888"}))
+            self.cam.configure(self.cam.create_preview_configuration(
+                main={"size": FRAME_SIZE, "format": "RGB888"}, raw={"size": self._full_view_mode()},
+            ))
             self.cam.start()
+            # As in the camera stream: keep the crop at the whole sensor, or the picture looks zoomed in.
+            self.cam.set_controls({"ScalerCrop": (0, 0) + tuple(self.cam.camera_properties["PixelArraySize"])})
             time.sleep(1.0)  # let the exposure settle
             w, h = FRAME_SIZE
             samples = np.concatenate([
@@ -648,6 +652,14 @@ class Camera:
             text = str(e).strip()
             self.error = text.splitlines()[-1] if text else type(e).__name__
             self.close()
+
+    def _full_view_mode(self):
+        """The size of the smallest sensor mode that still sees the whole sensor. For a small picture the
+        camera library would otherwise pick a mode that reads only the middle of it: a zoomed-in view."""
+        width, height = self.cam.camera_properties["PixelArraySize"]
+        modes = self.cam.sensor_modes
+        whole = [m for m in modes if tuple(m.get("crop_limits", (0, 0, width, height)))[2:] == (width, height)]
+        return min(whole or modes, key=lambda m: m["size"][0] * m["size"][1])["size"]
 
     @staticmethod
     def _encoder():

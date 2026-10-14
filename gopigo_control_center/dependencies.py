@@ -4,7 +4,7 @@ Imported once here and shared across the app so every module sees the same
 "None if missing" fallback instead of each file guessing on its own.
 
 Install them with:
-    pip install paramiko pygame Pillow opencv-python
+    pip install paramiko pygame Pillow opencv-python-headless
 """
 
 import os

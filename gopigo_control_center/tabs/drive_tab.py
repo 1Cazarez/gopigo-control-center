@@ -128,7 +128,7 @@ class DriveTabMixin:
     def _clear_obstacle(self):
         if self.obstacle_close:
             self.obstacle_close = False
-            self._update_drive_eyes()
+            self._update_eyes()
 
     def _check_obstacle(self, mm):
         """Called with each distance reading (mm, or None without a distance sensor). With the safety stop on,
@@ -144,7 +144,7 @@ class DriveTabMixin:
         was_close = self.obstacle_close
         self.obstacle_close = cm <= stop_cm + (OBSTACLE_CLEAR_MARGIN_CM if was_close else 0)
         if self.obstacle_close != was_close:
-            self._update_drive_eyes()
+            self._update_eyes()
         if self.obstacle_close and not was_close:
             message = f"Safety stop: something {cm:.0f} cm ahead."
             if self.manual_forward:

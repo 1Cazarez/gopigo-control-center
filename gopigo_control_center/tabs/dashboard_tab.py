@@ -18,7 +18,7 @@ from tkinter import messagebox, ttk
 
 import user_settings
 from constants import VENV_ACTIVATE, login_shell
-from camera_view import CameraView
+from camera_view import CameraView, face_detection_note
 from dependencies import pygame
 from gamepad import STANDARD_BUTTONS, Gamepad, button_label, list_controllers
 from remote_scripts import (
@@ -128,7 +128,7 @@ class DashboardTabMixin:
         self.top_speed = 0.0
         self.camera_views = []      # every live camera view, shown by the tick
         self.dashboard_face = False  # the Dashboard camera currently sees a face
-        self.drive_eyes = None      # the eye color driving is showing (yellow / red), or None for the user's own
+        self.eye_override = None    # the color the eyes show for what the robot sees (yellow / red), or None
         s = self.ui_scale
 
         outer = ttk.Frame(self.dashboard_tab, style="Card.TFrame", padding=10)
@@ -147,8 +147,11 @@ class DashboardTabMixin:
         self.dash_camera_btn = style_button(tk.Button(head, text="Start Camera", command=self.toggle_camera_stream), "success")
         self.dash_camera_btn.pack(side="right")
         style_button(tk.Button(head, text="Reset", command=self.reset_camera), "warning").pack(side="right", padx=6)
+        self.dash_face_note_var = tk.StringVar(value=face_detection_note())
+        ttk.Label(camera, textvariable=self.dash_face_note_var, style="CardMuted.TLabel").pack(side="bottom", anchor="w")
         self.dash_camera = CameraView(
-            camera, self.root, idle_text="Camera off -- click Start Camera", on_face_change=self._on_dashboard_face
+            camera, self.root, idle_text="Camera off -- click Start Camera", on_face_change=self._on_dashboard_face,
+            face_note_var=self.dash_face_note_var,
         )
         self.dash_camera.canvas.pack(fill="both", expand=True, pady=(6, 0))
         self.camera_views.append(self.dash_camera)
@@ -447,10 +450,9 @@ class DashboardTabMixin:
         self.motor_channel = channel
         self.controller_active = True
         self.shown_signal = "-"
-        self.drive_eyes = None
         self.driver_output = b""
         self._send_straight_assist()
-        self._update_drive_eyes()
+        self._resend_eyes()
         self.drive_btn.config(text="Stop Driving", state="normal")
         style_button(self.drive_btn, "danger", big=True)
         self.controller_status_var.set(f"Driving ({driver}).")
@@ -528,7 +530,7 @@ class DashboardTabMixin:
                 pass
             self._record_lights(left_blinker=False, right_blinker=False)
             self.hazards_on = False
-        self._restore_eyes_after_driving()
+        self._resend_eyes()
         self.drive_btn.config(text="Start Driving", state="normal")
         style_button(self.drive_btn, "success", big=True)
         self.motor_dps_var.set("Motors: --")
@@ -563,33 +565,36 @@ class DashboardTabMixin:
         self.dashboard_face = present
         if present:
             self._set_status("Face in view on the Dashboard camera.")
-        self._update_drive_eyes()
+        self._update_eyes()
 
-    # ---------------- Eyes while driving ----------------
-    def _update_drive_eyes(self):
-        """While driving with the controller, the eyes show yellow when the safety stop is holding the robot
-        back and red when the camera sees a face; otherwise they're whatever the user set."""
-        if not self.controller_active or self.motor_channel is None:
+    # ---------------- Eyes that report what the robot sees ----------------
+    def _update_eyes(self):
+        """The eyes go red when the camera sees a face, in any mode, and -- while driving with the controller --
+        yellow when the safety stop is holding the robot back (that wins). Otherwise they're whatever the user
+        set. The Autopilot's navigator does the same on the robot, so this leaves the eyes to it."""
+        if self.nav_channel is not None:
             return
-        color = DRIVE_EYES_YELLOW if self.obstacle_close else DRIVE_EYES_RED if self.dashboard_face else None
-        if color == self.drive_eyes:
+        driving = self.controller_active and self.motor_channel is not None
+        color = (DRIVE_EYES_YELLOW if driving and self.obstacle_close
+                 else DRIVE_EYES_RED if self.dashboard_face else None)
+        if color == self.eye_override:
             return
-        self.drive_eyes = color
-        if color is None:
+        self.eye_override = color
+        if color is None:  # back to the user's own setting
             color = self.led_colors["left_eye"] if self.light_on["left_eye"] else OFF
-        r, g, b = color
-        try:
-            self.motor_channel.send(f"LED,3,{r},{g},{b}\n")  # 3 = both eyes
-        except Exception:
-            pass
+        if driving:  # down the open motor channel: at once
+            r, g, b = color
+            try:
+                self.motor_channel.send(f"LED,3,{r},{g},{b}\n")  # 3 = both eyes
+            except Exception:
+                pass
+        elif self.ssh_client is not None:  # a separate command: a second or so
+            self._led_cmd([(3, color)], "Eyes red: a face is in view" if self.eye_override else "Eyes back")
 
-    def _restore_eyes_after_driving(self):
-        if self.drive_eyes is None:
-            return
-        self.drive_eyes = None
-        if self.ssh_client is not None:
-            on = self.light_on["left_eye"] or self.light_on["right_eye"]
-            self._set_lights({key: self._on_color(key) if on else OFF for key in ("left_eye", "right_eye")}, "Eyes back")
+    def _resend_eyes(self):
+        """The way to the robot changed (driving started or stopped): send the eyes' color again that way."""
+        self.eye_override = "resend"
+        self._update_eyes()
 
     # ---------------- Disconnect ----------------
     def _dashboard_on_disconnect(self):

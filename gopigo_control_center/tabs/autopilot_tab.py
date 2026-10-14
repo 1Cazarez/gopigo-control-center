@@ -17,7 +17,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from camera_view import CameraView
+from camera_view import CameraView, face_detection_note
 from constants import VENV_ACTIVATE, login_shell
 from remote_scripts import CAMERA_STREAM_PORT, NAVIGATOR_SCRIPT, REMOTE_KERNEL_DIR, REMOTE_NAVIGATOR_PATH
 from theme import BORDER, CARD_BG, DANGER, FONT_MONO_SMALL, MUTED, PRIMARY, SUCCESS, TEXT, style_button
@@ -178,9 +178,11 @@ class AutopilotTabMixin:
         ttk.Label(head, text="Robot's view", style="CardBold.TLabel").pack(side="left")
         self.nav_face_var = tk.StringVar(value="")
         ttk.Label(head, textvariable=self.nav_face_var, style="CardMuted.TLabel").pack(side="left", padx=10)
+        self.nav_face_note_var = tk.StringVar(value=face_detection_note())
+        ttk.Label(camera, textvariable=self.nav_face_note_var, style="CardMuted.TLabel").pack(side="bottom", anchor="w")
         self.nav_camera = CameraView(
             camera, self.root, idle_text="The live picture appears here while the autopilot runs.",
-            on_face_change=self._on_autopilot_face,
+            on_face_change=self._on_autopilot_face, face_note_var=self.nav_face_note_var,
         )
         self.nav_camera.canvas.pack(fill="both", expand=True, pady=(6, 0))
         self.camera_views.append(self.nav_camera)

@@ -13,8 +13,8 @@ the robot over your network. Tabs:
   on and an IMU plugged in.
   **Safety stop** (a checkbox on the Dashboard and Manual Control, or the Home button): with the sensors
   on, the robot won't drive forward into anything closer than 20 cm (the distance is set in Controller
-  Settings); it can still reverse or spin away. While driving, the eyes turn yellow when the safety stop
-  is holding the robot back and red when the camera sees a face.
+  Settings); it can still reverse or spin away. The eyes turn red whenever the camera sees a face, in
+  any mode, and yellow while driving when the safety stop is holding the robot back.
   Choose what the other buttons do -- blinkers, hazard lights, eye colors (X steps through them, then
   off), camera and more -- in **Controller Settings**; a legend on the Dashboard lists what every
   button does, and a drawing of the robot shows which lights should be on. Your choices are saved in
@@ -52,7 +52,7 @@ the robot over your network. Tabs:
   - Debian / Ubuntu / Raspberry Pi OS: `sudo apt install python3-tk`
   - Arch: `sudo pacman -S tk`
 - A web browser, for JupyterLab.
-- Optional: OpenCV (`opencv-python`, in `requirements.txt`), for face detection. The face model
+- Optional: OpenCV (`opencv-python-headless`, in `requirements.txt`), for face detection. The face model
   ships with the app; without OpenCV everything else still works.
 
 **On the robot**
@@ -83,7 +83,10 @@ pip install -r gopigo_control_center/requirements.txt
 python3 gopigo_control_center/main.py
 ```
 
-Enter the robot's host, username and password at the top of the window and click **Connect**. If you
+Enter the robot's host, username and password at the top of the window and click **Connect**. Tick
+**Remember** to have the app fill them in next time: the host and username go in the settings file, and
+the password in your system's password store (GNOME Keyring or KWallet, Windows Credential Manager, the
+macOS Keychain) through the `keyring` library -- never in a file. Unticking it deletes the stored password. If you
 open a new terminal later, run the `source .venv/bin/activate` line again first.
 
 ### Where things land on the robot

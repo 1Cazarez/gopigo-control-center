@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
+import credentials
 import user_settings
 from dependencies import paramiko, pygame
 from tabs import (
@@ -116,7 +117,7 @@ class GoPiGoApp(
         tk.Label(frame, text="Host", bg=BAR_BG, fg="#9aa5b4", font=("Segoe UI", 9)).grid(
             row=0, column=1, sticky="e", padx=(0, 4)
         )
-        self.host_var = tk.StringVar(value="robot1.local")
+        self.host_var = tk.StringVar(value=self.settings["host"])
         tk.Entry(frame, textvariable=self.host_var, width=18, **entry_opts).grid(
             row=0, column=2, padx=(0, 12), ipady=3
         )
@@ -124,7 +125,7 @@ class GoPiGoApp(
         tk.Label(frame, text="User", bg=BAR_BG, fg="#9aa5b4", font=("Segoe UI", 9)).grid(
             row=0, column=3, sticky="e", padx=(0, 4)
         )
-        self.user_var = tk.StringVar(value="pi")
+        self.user_var = tk.StringVar(value=self.settings["user"])
         tk.Entry(frame, textvariable=self.user_var, width=8, **entry_opts).grid(
             row=0, column=4, padx=(0, 12), ipady=3
         )
@@ -134,19 +135,52 @@ class GoPiGoApp(
         )
         self.pass_var = tk.StringVar()
         tk.Entry(frame, textvariable=self.pass_var, show="*", width=12, **entry_opts).grid(
-            row=0, column=6, padx=(0, 14), ipady=3
+            row=0, column=6, padx=(0, 6), ipady=3
         )
+
+        # Remember the password in the system's password store (see credentials.py), never in a file.
+        can_remember = credentials.available()
+        self.remember_var = tk.BooleanVar(value=self.settings["remember_password"] and can_remember)
+        tk.Checkbutton(
+            frame, text="Remember" if can_remember else "Remember (no password store)", variable=self.remember_var,
+            command=self._on_remember_toggled, state="normal" if can_remember else "disabled",
+            bg=BAR_BG, fg="#9aa5b4", activebackground=BAR_BG, activeforeground="#ffffff", selectcolor="#2b3543",
+            highlightthickness=0, font=("Segoe UI", 9),
+        ).grid(row=0, column=7, padx=(0, 14))
 
         self.connect_btn = style_button(
             tk.Button(frame, text="Connect", command=self.toggle_connection), "success"
         )
-        self.connect_btn.grid(row=0, column=7, padx=(0, 12))
+        self.connect_btn.grid(row=0, column=8, padx=(0, 12))
 
         self.conn_status_var = tk.StringVar(value="Not connected")
         self.conn_status_label = tk.Label(
             frame, textvariable=self.conn_status_var, bg=BAR_BG, fg="#e0473b", font=("Segoe UI", 9, "bold")
         )
-        self.conn_status_label.grid(row=0, column=8, padx=6)
+        self.conn_status_label.grid(row=0, column=9, padx=6)
+
+        if self.remember_var.get():
+            self._fill_remembered_password()
+
+    # ---------------- Remembering the password ----------------
+    def _fill_remembered_password(self):
+        host, user = self.host_var.get().strip(), self.user_var.get().strip()
+
+        def worker():
+            password = credentials.load(host, user)
+            if password:
+                self.root.after(0, lambda: self.pass_var.get() or self.pass_var.set(password))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_remember_toggled(self):
+        remember = self.remember_var.get()
+        self.settings["remember_password"] = remember
+        user_settings.save(self.settings)
+        if not remember:
+            host, user = self.host_var.get().strip(), self.user_var.get().strip()
+            threading.Thread(target=lambda: credentials.forget(host, user), daemon=True).start()
+            self._set_status("The password won't be remembered, and the saved one is deleted.")
 
     def toggle_connection(self):
         if self.ssh_client is not None:
@@ -170,8 +204,12 @@ class GoPiGoApp(
 
         self.conn_status_var.set("Connecting...")
         self.root.update_idletasks()
+        remember = self.remember_var.get()
 
         def worker():
+            nonlocal password
+            if not password and remember:
+                password = credentials.load(host, user) or ""
             try:
                 client = paramiko.SSHClient()
                 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -179,12 +217,21 @@ class GoPiGoApp(
                 client.get_transport().set_keepalive(KEEPALIVE_SECONDS)  # also keeps Wi-Fi routers from dropping an idle link
                 self.ssh_password = password
                 self.ssh_client = client
+                # It worked: remember (or forget) the details for next time.
+                problem = credentials.save(host, user, password) if remember else credentials.forget(host, user)
                 self.root.after(0, self._on_connected)
+                self.root.after(0, lambda: self._remember_login(host, user, problem))
             except Exception as e:
                 error = str(e)  # `e` is deleted when this block ends, before the lambda runs
                 self.root.after(0, lambda: self._on_connect_failed(error))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _remember_login(self, host, user, problem):
+        self.settings.update(host=host, user=user)
+        user_settings.save(self.settings)
+        if problem:
+            self._set_status(f"Connected, but couldn't remember the password: {problem}")
 
     def _on_connected(self):
         self.conn_status_var.set("Connected")

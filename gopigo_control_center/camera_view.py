@@ -21,6 +21,17 @@ FACE_HOLD_SECONDS = 1.0  # a face counts as still there this long after it was l
 FACE_BOX = "#e0473b"
 
 
+def face_detection_note():
+    """Whether faces can be looked for, in a few words, without loading the model."""
+    if cv2 is None:
+        return "No face detection: install OpenCV (pip install opencv-python-headless) and restart the app"
+    if not hasattr(cv2, "FaceDetectorYN"):
+        return "No face detection: needs OpenCV 4.5.4 or newer (pip install -U opencv-python-headless)"
+    if not os.path.exists(FACE_MODEL):
+        return "No face detection: the face model is missing from models/"
+    return "Face detection on"
+
+
 class FaceDetector:
     """Finds faces with OpenCV's YuNet model. error says why it can't, if it can't."""
 
@@ -29,9 +40,9 @@ class FaceDetector:
         self._detector = None
         self._size = None
         if cv2 is None:
-            self.error = "Face detection needs OpenCV: pip install opencv-python"
+            self.error = "Face detection needs OpenCV: pip install opencv-python-headless"
         elif not hasattr(cv2, "FaceDetectorYN"):
-            self.error = "Face detection needs OpenCV 4.5.4 or newer: pip install -U opencv-python"
+            self.error = "Face detection needs OpenCV 4.5.4 or newer: pip install -U opencv-python-headless"
         else:
             try:
                 self._detector = cv2.FaceDetectorYN.create(FACE_MODEL, "", (DETECT_WIDTH, 240), FACE_SCORE, 0.3, 5000)
@@ -55,9 +66,10 @@ class FaceDetector:
 
 
 class CameraView:
-    def __init__(self, parent, root, idle_text="Camera off", on_face_change=None):
+    def __init__(self, parent, root, idle_text="Camera off", on_face_change=None, face_note_var=None):
         """on_face_change(present, snapshot) is called on the Tk thread when a face appears (with the frame,
-        boxes drawn) or goes (snapshot None)."""
+        boxes drawn) or goes (snapshot None). face_note_var, a StringVar, is told whether faces are being
+        looked for."""
         import tkinter as tk
 
         self.root = root
@@ -74,6 +86,7 @@ class CameraView:
         self.face_present = False
         self.face_last_seen = 0.0
         self.face_note = ""      # why faces aren't being looked for, if they aren't
+        self.face_note_var = face_note_var
         self.placeholder()
 
     # ---- running ----
@@ -99,6 +112,9 @@ class CameraView:
     def _read(self, url, token):
         detector = FaceDetector()
         self.face_note = detector.error
+        if self.face_note_var is not None:
+            note = detector.error or "Face detection on"
+            self.root.after(0, lambda: self.face_note_var.set(note))
         try:
             with urllib.request.urlopen(url + "stream.mjpg", timeout=10) as stream:
                 while self.reader is token:
