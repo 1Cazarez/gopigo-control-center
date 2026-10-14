@@ -448,6 +448,8 @@ class DashboardTabMixin:
         self.controller_active = True
         self.shown_signal = "-"
         self.drive_eyes = None
+        self.driver_output = b""
+        self._send_straight_assist()
         self._update_drive_eyes()
         self.drive_btn.config(text="Stop Driving", state="normal")
         style_button(self.drive_btn, "danger", big=True)
@@ -474,6 +476,7 @@ class DashboardTabMixin:
             lines = error.decode(errors="replace").strip().splitlines()
             self._stop_driving(f"The robot's motor driver stopped: {lines[-1] if lines else 'no error message'}")
             return
+        self._read_driver_status(channel)
 
         left, right, signal = racing_drive(
             sticks, pressed, self.controller_max_speed_var.get(), self.settings["deadzone"], self.obstacle_close
@@ -493,6 +496,26 @@ class DashboardTabMixin:
             self._stop_driving(f"Lost the motor channel: {e}")
             return
         self.motor_dps_var.set(f"Motors: L={left}  R={right}")
+
+    def _read_driver_status(self, channel):
+        """Show the driver's "STATUS ..." lines (the straight-line assist reports through them)."""
+        while channel.recv_ready():
+            self.driver_output += channel.recv(4096)
+        *lines, self.driver_output = self.driver_output.split(b"\n")
+        for line in lines:
+            if line.startswith(b"STATUS "):
+                self.controller_status_var.set(line[7:].decode(errors="replace"))
+
+    def _send_straight_assist(self):
+        if self.motor_channel is not None:
+            try:
+                self.motor_channel.send(f"HOLD,{1 if self.settings['straight_assist'] else 0}\n")
+            except Exception:
+                pass
+
+    def _set_straight_assist(self, on):
+        self._save_setting("straight_assist", on)
+        self._send_straight_assist()
 
     def _stop_driving(self, message):
         self.controller_active = False
@@ -626,6 +649,11 @@ class ControllerSettingsWindow:
             command=lambda v: app._set_stop_distance(int(float(v))),
         ).pack(anchor="w")
         app._safety_stop_checkbox(side).pack(anchor="w")
+        self.straight_var = tk.BooleanVar(value=app.settings["straight_assist"])
+        tk.Checkbutton(
+            side, text="Keep straight (IMU)", variable=self.straight_var, bg=CARD_BG, activebackground=CARD_BG,
+            highlightthickness=0, command=lambda: app._set_straight_assist(self.straight_var.get()),
+        ).pack(anchor="w")
         ttk.Label(
             side, text="(no driving forward closer than this; needs the sensors on)", style="CardMuted.TLabel",
         ).pack(anchor="w")

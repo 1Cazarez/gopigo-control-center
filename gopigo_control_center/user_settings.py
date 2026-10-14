@@ -24,6 +24,7 @@ DEFAULTS = {
     },
     "max_speed": 250,
     "deadzone": 0.15,
+    "straight_assist": True,  # the IMU keeps the robot on course while driving straight with the controller
     "safety_stop": True,     # don't drive forward into anything closer than obstacle_stop_cm
     "obstacle_stop_cm": 20,
     "low_battery_v": 9.0,    # the Autopilot logs a low-battery incident at or below this

@@ -187,8 +187,144 @@ int gpg_set_led(int led, int red, int green, int blue) {
 }
 '''
 
-# Thin Python interface over the compiled C driver. Reads the stdin lines
-# described above; the pure-Python fallback below reads exactly the same ones.
+# The motor driver's main loop, shared by the C-backed driver and the
+# pure-Python fallback below; each defines set_dps(port, dps),
+# set_led(mask, red, green, blue) and close_board() first.
+#
+# Straight-line assist: while the app asks for both wheels at the same speed
+# (driving straight), the driver keeps the robot on the heading it had when
+# that started, by speeding one wheel up and slowing the other. The heading
+# comes from the IMU through the telemetry process (YAW_FILE): the IMU has
+# one owner, since opening it resets it. A line "HOLD,1" / "HOLD,0" turns the
+# assist on or off, and the driver reports what it's doing in "STATUS ..."
+# lines. During deliberate turns it checks that the IMU agrees with the wheels
+# about which way is clockwise, and flips its correction if it doesn't.
+MOTOR_STREAM_COMMON = r'''
+import math
+import os
+import time
+
+MOTOR_LEFT, MOTOR_RIGHT, MOTOR_BOTH = 1, 2, 3
+BLINKER_LEFT, BLINKER_RIGHT = 0x04, 0x08
+BLINKERS = {"L": BLINKER_LEFT, "R": BLINKER_RIGHT, "-": 0}
+YAW_FILE = "/dev/shm/gopigo_yaw" if os.path.isdir("/dev/shm") else "/tmp/gopigo_yaw"
+YAW_FRESH_S = 0.5         # an older heading than this means the telemetry isn't running
+HOLD_GAIN = 8.0           # deg/sec of wheel-speed difference per degree off course
+HOLD_MAX_SHARE = 0.3      # the correction is at most this share of the driving speed
+TURN_CHECK_DPS = 100      # a deliberate turn: one wheel at least this much faster than the other
+TURN_CHECK_RATE = 20      # deg/sec of turning the IMU must see to judge the direction
+TURN_CHECK_COUNT = 4      # readings in a row that must agree (or disagree)
+
+blinker = 0  # the blinkers lit (as a mask), so they can be turned off on exit
+
+
+def status(message):
+    print("STATUS " + message, flush=True)
+
+
+def set_blinker(lit):
+    set_led(BLINKER_LEFT + BLINKER_RIGHT - lit, 0, 0, 0)
+    if lit:
+        set_led(lit, 255, 0, 0)
+
+
+def read_yaw():
+    """The robot's heading in degrees (clockwise seen from above, from an arbitrary zero), or None."""
+    try:
+        with open(YAW_FILE) as f:
+            yaw, stamp = (float(v) for v in f.read().split())
+    except (OSError, ValueError):
+        return None
+    return yaw if time.time() - stamp < YAW_FRESH_S else None
+
+
+class StraightAssist:
+    def __init__(self):
+        self.enabled = True
+        self.target = None       # the heading being held, while driving straight
+        self.sign = 1            # flipped if the IMU turns out to count the other way round
+        self.checked = False     # the turn check has confirmed the direction
+        self.votes = 0           # agreeing (+) or disagreeing (-) readings in a row
+        self.last = None         # (yaw, time) of the previous update, for the turning rate
+        self.said = None
+
+    def say(self, message):
+        if message != self.said:
+            self.said = message
+            status(message)
+
+    def wheels(self, left, right):
+        """The wheel speeds to use for a request of (left, right)."""
+        yaw = read_yaw()
+        now = time.time()
+        rate = None
+        if yaw is not None and self.last is not None and now > self.last[1]:
+            rate = (yaw - self.last[0]) / (now - self.last[1])
+        self.last = (yaw, now) if yaw is not None else None
+        if not self.enabled:
+            self.target = None
+            return left, right
+        if yaw is None:
+            self.target = None
+            self.say("Straight assist paused: no IMU heading (are the sensors on, with an IMU plugged in?)")
+            return left, right
+        self.say("Straight assist on (IMU).")
+        if left == right and left != 0:
+            if self.target is None:
+                self.target = yaw
+            off_course = self.sign * (yaw - self.target)  # degrees, + = turned right
+            limit = HOLD_MAX_SHARE * abs(left)
+            correction = max(-limit, min(limit, HOLD_GAIN * off_course))
+            return left - correction, right + correction
+        self.target = None
+        if not self.checked and rate is not None and abs(left - right) >= TURN_CHECK_DPS and abs(rate) >= TURN_CHECK_RATE:
+            agrees = (self.sign * rate > 0) == (left > right)  # left wheel faster turns the robot clockwise
+            self.votes = max(1, self.votes + 1) if agrees else min(-1, self.votes - 1)
+            if self.votes >= TURN_CHECK_COUNT:
+                self.checked = True
+            elif self.votes <= -TURN_CHECK_COUNT:
+                self.sign = -self.sign
+                self.votes = 0
+                self.said = None
+                status("Straight assist: the IMU counts turns the other way round; corrected.")
+        return left, right
+
+
+assist = StraightAssist()
+try:
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            fields = line.split(",")
+            if fields[0] == "LED":
+                led, red, green, blue = (int(v) for v in fields[1:5])
+                set_led(led, red, green, blue)
+                blinker = blinker | (led & 0x0C) if red else blinker & ~led
+                continue
+            if fields[0] == "HOLD":
+                assist.enabled = fields[1] == "1"
+                assist.said = None
+                if not assist.enabled:
+                    assist.say("Straight assist off.")
+                continue
+            left, right = assist.wheels(int(fields[0]), int(fields[1]))
+            set_dps(MOTOR_LEFT, left)
+            set_dps(MOTOR_RIGHT, right)
+            if len(fields) > 2:
+                blinker = BLINKERS[fields[2]]
+                set_blinker(blinker)
+        except Exception:
+            pass
+finally:
+    set_dps(MOTOR_BOTH, 0)
+    if blinker:
+        set_blinker(0)
+    close_board()
+'''
+
+# The driver backed by the compiled C library.
 MOTOR_STREAM_SCRIPT = r'''import ctypes
 import os
 import sys
@@ -199,20 +335,6 @@ lib.gpg_spi_open.restype = ctypes.c_int
 lib.gpg_set_motor_dps.argtypes = [ctypes.c_int, ctypes.c_int]
 lib.gpg_set_led.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
 
-MOTOR_LEFT = 1
-MOTOR_RIGHT = 2
-MOTOR_BOTH = 3
-BLINKER_LEFT = 0x04
-BLINKER_RIGHT = 0x08
-BLINKERS = {"L": BLINKER_LEFT, "R": BLINKER_RIGHT, "-": 0}
-blinker = 0  # the blinkers lit (as a mask), so they can be turned off on exit
-
-
-def set_blinker(lit):
-    lib.gpg_set_led(BLINKER_LEFT + BLINKER_RIGHT - lit, 0, 0, 0)
-    if lit:
-        lib.gpg_set_led(lit, 255, 0, 0)
-
 rc = lib.gpg_spi_open()
 if rc != 0:
     sys.stderr.write(f"gpg_spi_open failed (code {rc}) -- is SPI enabled on the Pi?\n")
@@ -220,31 +342,18 @@ if rc != 0:
     sys.exit(1)
 lib.gpg_clear_motor_limits()  # a speed limit left by an EasyGoPiGo3 program would cap the controller
 
-try:
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            fields = line.split(",")
-            if fields[0] == "LED":
-                led, red, green, blue = (int(v) for v in fields[1:5])
-                lib.gpg_set_led(led, red, green, blue)
-                blinker = blinker | (led & 0x0C) if red else blinker & ~led
-                continue
-            lib.gpg_set_motor_dps(MOTOR_LEFT, int(fields[0]))
-            lib.gpg_set_motor_dps(MOTOR_RIGHT, int(fields[1]))
-            if len(fields) > 2:
-                blinker = BLINKERS[fields[2]]
-                set_blinker(blinker)
-        except Exception:
-            pass
-finally:
-    lib.gpg_set_motor_dps(MOTOR_BOTH, 0)
-    if blinker:
-        set_blinker(0)
+
+def set_dps(port, dps):
+    lib.gpg_set_motor_dps(port, int(dps))
+
+
+def set_led(mask, red, green, blue):
+    lib.gpg_set_led(mask, red, green, blue)
+
+
+def close_board():
     lib.gpg_spi_close()
-'''
+''' + MOTOR_STREAM_COMMON
 
 # Pure-Python fallback, used automatically if the Pi doesn't have a C
 # compiler available (e.g. gcc missing on a minimal OS image). Functionally
@@ -254,39 +363,19 @@ import gopigo3
 
 g = gopigo3.GoPiGo3()
 g.set_motor_limits(g.MOTOR_LEFT + g.MOTOR_RIGHT, 0, 0)  # 0 = no limit; see gpg_clear_motor_limits
-BLINKERS = {"L": g.LED_BLINKER_LEFT, "R": g.LED_BLINKER_RIGHT, "-": 0}
-blinker = 0
 
 
-def set_blinker(lit):
-    g.set_led(g.LED_BLINKER_LEFT + g.LED_BLINKER_RIGHT - lit, 0)
-    if lit:
-        g.set_led(lit, 255)
+def set_dps(port, dps):
+    g.set_motor_dps(port, int(dps))
 
 
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        fields = line.split(",")
-        if fields[0] == "LED":
-            led, red, green, blue = (int(v) for v in fields[1:5])
-            g.set_led(led, red, green, blue)
-            blinker = blinker | (led & 0x0C) if red else blinker & ~led
-            continue
-        g.set_motor_dps(g.MOTOR_LEFT, int(fields[0]))
-        g.set_motor_dps(g.MOTOR_RIGHT, int(fields[1]))
-        if len(fields) > 2:
-            blinker = BLINKERS[fields[2]]
-            set_blinker(blinker)
-    except Exception:
-        pass
+def set_led(mask, red, green, blue):
+    g.set_led(mask, red, green, blue)
 
-g.set_motor_dps(g.MOTOR_LEFT + g.MOTOR_RIGHT, 0)
-if blinker:
-    set_blinker(0)
-'''
+
+def close_board():
+    pass
+''' + MOTOR_STREAM_COMMON
 
 # ---- Dashboard telemetry ----
 # A small process on the Pi that prints one JSON line of sensor readings about
@@ -299,15 +388,24 @@ if blinker:
 REMOTE_TELEMETRY_PATH = f"{REMOTE_KERNEL_DIR}/telemetry.py"
 
 TELEMETRY_SCRIPT = r'''import json
+import math
+import os
+import threading
 import time
 
 import gopigo3
 
-INTERVAL = 0.2       # seconds between readings
+INTERVAL = 0.2       # seconds between readings sent to the app
 PROBE_EVERY = 5.0    # seconds between looks for a missing sensor
 IMU_PORTS = ("AD1", "AD2", "I2C")
+YAW_FILE = "/dev/shm/gopigo_yaw" if os.path.isdir("/dev/shm") else "/tmp/gopigo_yaw"
+YAW_EVERY = 0.03     # seconds between gyro readings
+DISPLAY_EVERY = 0.2  # seconds between the slower IMU readings shown in the app
+STILL_SECONDS = 0.5  # wheels unmoved this long: the robot is still, so the gyro's reading is its bias
+BIAS_MAX_DPS = 3.0   # ...unless it reads more than this: that's real turning (just started, or turned by hand)
 
 g = gopigo3.GoPiGo3()
+still_since = [time.time()]  # when the wheels last moved, from the main loop's encoder readings
 
 
 def open_distance_sensor():
@@ -325,16 +423,81 @@ def open_imu():
         return None
     for port in IMU_PORTS:
         try:
-            return EasyIMUSensor(port=port, use_mutex=True)
+            return IMUWorker(EasyIMUSensor(port=port, use_mutex=True))
         except Exception:
             pass
     return None
 
 
+class IMUWorker:
+    """The IMU's only user. Adds up the turning rate about the vertical axis -- whichever way the IMU is
+    mounted, found from gravity -- into a heading, published in YAW_FILE for the motor driver's straight-line
+    assist, and takes the slower readings shown in the app."""
+
+    def __init__(self, imu):
+        self.imu = imu
+        self.up = self._up()
+        self.bias = 0.0
+        self.yaw = 0.0       # degrees clockwise seen from above, from where it started
+        self.display = None
+        self.failed = False
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _up(self):
+        ax, ay, az = self.imu.safe_read_accelerometer()  # at rest it measures gravity's push, pointing up
+        n = math.sqrt(ax * ax + ay * ay + az * az)
+        if n < 5:
+            raise ValueError("the accelerometer reading doesn't look like gravity")
+        return ax / n, ay / n, az / n
+
+    def _turn_rate(self):
+        gx, gy, gz = self.imu.safe_read_gyroscope()  # deg/sec about the IMU's own axes
+        ux, uy, uz = self.up
+        return -(gx * ux + gy * uy + gz * uz)  # clockwise seen from above
+
+    def _publish(self, now):
+        tmp = YAW_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(f"{self.yaw:.3f} {now:.3f}\n")
+        os.replace(tmp, YAW_FILE)
+
+    def _loop(self):
+        last = time.time()
+        last_display = last_up = 0.0
+        while True:
+            try:
+                rate = self._turn_rate() - self.bias
+                now = time.time()
+                if now - still_since[0] >= STILL_SECONDS and abs(rate) < BIAS_MAX_DPS:
+                    self.bias += 0.05 * rate  # still: whatever it reads is bias
+                    if now - last_up >= 1.0:
+                        last_up, self.up = now, self._up()
+                else:
+                    self.yaw += rate * (now - last)
+                last = now
+                self._publish(now)
+                if now - last_display >= DISPLAY_EVERY:
+                    last_display = now
+                    heading, roll, pitch = self.imu.safe_read_euler()
+                    self.display = {
+                        "heading": round(heading, 1), "roll": round(roll, 1), "pitch": round(pitch, 1),
+                        "gyro": [round(v, 1) for v in self.imu.safe_read_gyroscope()],
+                        "calibration": self.imu.safe_calibration_status(),
+                        "yaw": round(self.yaw, 1),
+                    }
+            except Exception:
+                self.failed = True
+                return
+            time.sleep(YAW_EVERY)
+
+
 distance_sensor = imu = None
 last_probe = 0.0
+last_encoders = None
 while True:
     started = time.time()
+    if imu is not None and imu.failed:
+        imu = None
     if started - last_probe >= PROBE_EVERY and (distance_sensor is None or imu is None):
         last_probe = started
         distance_sensor = distance_sensor or open_distance_sensor()
@@ -343,7 +506,11 @@ while True:
     reading = {}
     try:
         reading["battery"] = round(g.get_voltage_battery(), 2)
-        reading["encoders"] = [g.get_motor_encoder(g.MOTOR_LEFT), g.get_motor_encoder(g.MOTOR_RIGHT)]
+        encoders = [g.get_motor_encoder(g.MOTOR_LEFT), g.get_motor_encoder(g.MOTOR_RIGHT)]
+        reading["encoders"] = encoders
+        if encoders != last_encoders:
+            still_since[0] = started
+            last_encoders = encoders
     except Exception:
         pass
     if distance_sensor is not None:
@@ -351,16 +518,8 @@ while True:
             reading["distance_mm"] = distance_sensor.read_mm()
         except Exception:
             distance_sensor = None
-    if imu is not None:
-        try:
-            heading, roll, pitch = imu.safe_read_euler()
-            reading["imu"] = {
-                "heading": round(heading, 1), "roll": round(roll, 1), "pitch": round(pitch, 1),
-                "gyro": [round(v, 1) for v in imu.safe_read_gyroscope()],
-                "calibration": imu.safe_calibration_status(),
-            }
-        except Exception:
-            imu = None
+    if imu is not None and imu.display is not None:
+        reading["imu"] = imu.display
 
     print(json.dumps(reading), flush=True)  # fails, ending the program, once the app closes the channel
     time.sleep(max(0.0, INTERVAL - (time.time() - started)))
