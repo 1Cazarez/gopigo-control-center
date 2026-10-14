@@ -12,8 +12,6 @@ DEFAULTS = {
     "bindings": {
         "start": "drive",
         "south": "estop",  # the B button
-        "rightshoulder": "speed_up",
-        "leftshoulder": "speed_down",
         "dpleft": "left_blinker",
         "dpright": "right_blinker",
         "west": "hazards",  # Y

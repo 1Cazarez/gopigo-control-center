@@ -6,8 +6,10 @@ persistent SSH channel to a small process on the robot (see remote_scripts.py) w
 is written in C (motor_stream_spi.c, compiled on the Pi each time driving starts). If the Pi has no C
 compiler, it falls back to a pure-Python driver.
 
-Controller buttons can be bound to actions -- lights, speed, camera and so on -- in the Controller Settings
-window. The bindings are saved by user_settings.py.
+Driving uses racing controls: ZR is the gas, ZL brakes and reverses, the left stick steers (only while
+moving, like a car), holding L or R spins the robot on the spot, and the right stick raises or lowers the top
+speed. These are fixed; the other buttons can be bound to actions -- lights, camera and so on -- in the
+Controller Settings window. The bindings are saved by user_settings.py.
 """
 
 import io
@@ -32,13 +34,61 @@ from remote_scripts import (
 from theme import CARD_BG, FONT_MONO_SMALL, MUTED, style_button
 from widgets import ControllerView
 
-from .lights_tab import BLINKER_ON, OFF, turn_signal
+from .lights_tab import BLINKER_ON, OFF
 from .sensors_panel import SENSORS_OFF
 
 TICK_MS = 50            # how often the controller is read (and a motor update sent while driving)
 OPEN_TIMEOUT = 15       # seconds to wait for the robot to open a channel
 SPEED_STEP = 50         # deg/sec per press of a speed-up / slow-down button
 MIN_SPEED, MAX_SPEED = 50, 500
+
+# The racing controls. These buttons always drive, so they can't be bound to actions.
+DRIVE_BUTTONS = {
+    "zr": "Gas",
+    "zl": "Brake / reverse",
+    "leftshoulder": "Spin left (hold)",
+    "rightshoulder": "Spin right (hold)",
+}
+DRIVE_HELP = "ZR gas · ZL brake/reverse · left stick steers · hold L/R to spin · right stick up/down sets top speed"
+SPIN_SHARE = 0.6   # spinning on the spot runs the wheels at this share of the top speed
+SPEED_RATE = 200   # deg/sec the top speed changes per second with the right stick pushed all the way
+
+
+def racing_drive(sticks, pressed, top_speed, deadzone):
+    """(left wheel, right wheel, turn signal) in deg/sec for the racing controls.
+
+    Steering works like a car: it bends the path only while the robot moves, and at full lock the inner wheel
+    stops. The turn signal follows the steering, so reversing with the stick to the right still signals right.
+    """
+    spin = int(top_speed * SPIN_SHARE)
+    spin_left, spin_right = "leftshoulder" in pressed, "rightshoulder" in pressed
+    if spin_left != spin_right:
+        return (-spin, spin, "L") if spin_left else (spin, -spin, "R")
+
+    forward = (("zr" in pressed) - ("zl" in pressed)) * top_speed
+    steer = sticks[0] if abs(sticks[0]) >= deadzone else 0.0
+    if forward == 0:
+        return 0, 0, "-"
+    left, right = forward * (1 + steer), forward * (1 - steer)
+    scale = max(abs(left), abs(right)) / top_speed  # keep the outer wheel within the top speed
+    signal = "R" if steer > 0 else "L" if steer < 0 else "-"
+    return int(left / scale), int(right / scale), signal
+
+
+# Short names for the Dashboard's button legend, where space is tight.
+SHORT_BUTTONS = {
+    "east": "A", "south": "B", "north": "X", "west": "Y",
+    "dpup": "↑", "dpdown": "↓", "dpleft": "←", "dpright": "→",
+    "back": "−", "start": "+", "guide": "Home", "leftstick": "LS", "rightstick": "RS",
+}
+SHORT_ACTIONS = {
+    "drive": "Drive on/off", "estop": "E-stop", "speed_up": "Faster", "speed_down": "Slower",
+    "left_blinker": "L blinker", "right_blinker": "R blinker", "hazards": "Hazards", "eyes": "Eyes on/off",
+    "eye_color": "Eye color", "lights_off": "Lights off", "camera": "Camera", "sensors": "Sensors",
+}
+LEGEND_DRIVING = [("ZR", "Gas"), ("ZL", "Brake/rev"), ("L/R", "Spin"), ("L-stick", "Steer"), ("R-stick", "Top speed")]
+LEGEND_COLUMNS = 3
+
 
 # What a controller button can do: action name -> label shown in the settings window.
 ACTIONS = {
@@ -51,7 +101,7 @@ ACTIONS = {
     "right_blinker": "Right blinker on/off",
     "hazards": "Hazard lights on/off",
     "eyes": "Eyes on/off",
-    "eye_color": "Next eye color",
+    "eye_color": "Next eye color (then off)",
     "lights_off": "All lights off",
     "camera": "Camera on/off",
     "sensors": "Sensors on/off",
@@ -66,6 +116,8 @@ class DashboardTabMixin:
         self.drive_starting = False
         self.hazards_on = False
         self.shown_signal = "-"     # the turn signal last sent while driving
+        self.top_speed_changing = False  # the right stick is changing the top speed
+        self.top_speed = 0.0
         self.camera_reader = None   # identifies the running frame reader; None stops it
         self.camera_frame = None    # the newest decoded frame, waiting to be shown
         self.camera_photo = None
@@ -103,6 +155,8 @@ class DashboardTabMixin:
         self.controller_view = ControllerView(controller, scale=s * 0.85)
         self.controller_view.pack(side="left")
         self.controller_view.set_enabled(False)
+        # Which lights should be on, as on the Manual Control tab (click one to switch it).
+        self._add_lights_view(controller, s * 0.75).pack(side="right", padx=(12, 0))
 
         side = ttk.Frame(controller, style="Card.TFrame")
         side.pack(side="left", fill="both", expand=True, padx=(16, 0))
@@ -111,11 +165,11 @@ class DashboardTabMixin:
         pick.pack(fill="x")
         ttk.Label(pick, text="Controller:", style="Card.TLabel").pack(side="left")
         self.controller_choice_var = tk.StringVar()
-        self.controller_combo = ttk.Combobox(pick, textvariable=self.controller_choice_var, state="readonly", width=34)
+        self.controller_combo = ttk.Combobox(pick, textvariable=self.controller_choice_var, state="readonly", width=24)
         self.controller_combo.pack(side="left", padx=6)
         self.controller_combo.bind("<<ComboboxSelected>>", lambda e: self._open_selected_controller())
         style_button(tk.Button(pick, text="Refresh", command=self.refresh_controllers), "neutral").pack(side="left")
-        style_button(tk.Button(pick, text="Controller Settings...", command=self.open_controller_settings), "neutral").pack(
+        style_button(tk.Button(pick, text="Settings...", command=self.open_controller_settings), "neutral").pack(
             side="left", padx=6
         )
 
@@ -129,7 +183,7 @@ class DashboardTabMixin:
 
         speed = ttk.Frame(side, style="Card.TFrame")
         speed.pack(fill="x")
-        ttk.Label(speed, text="Max speed (deg/sec):", style="Card.TLabel").pack(side="left")
+        ttk.Label(speed, text="Top speed (deg/sec):", style="Card.TLabel").pack(side="left")
         self.controller_max_speed_var = tk.IntVar(value=self.settings["max_speed"])
         tk.Scale(
             speed, from_=MIN_SPEED, to=MAX_SPEED, resolution=10, orient="horizontal",
@@ -139,8 +193,14 @@ class DashboardTabMixin:
         self.motor_dps_var = tk.StringVar(value="Motors: --")
         ttk.Label(speed, textvariable=self.motor_dps_var, style="Card.TLabel").pack(side="left", padx=8)
 
+        # What each button does, in a compact legend (it follows the bindings in Settings).
+        self.controls_legend_var = tk.StringVar()
+        tk.Label(
+            side, textvariable=self.controls_legend_var, font=FONT_MONO_SMALL, bg=CARD_BG, fg=MUTED, justify="left",
+        ).pack(anchor="w", pady=(8, 0))
+        self._refresh_controls_legend()
         self.controller_status_var = tk.StringVar(value="")
-        ttk.Label(side, textvariable=self.controller_status_var, style="CardMuted.TLabel").pack(anchor="w", pady=(8, 0))
+        ttk.Label(side, textvariable=self.controller_status_var, style="CardMuted.TLabel").pack(anchor="w", pady=(4, 0))
         self.raw_buttons_var = tk.StringVar(value="")
         ttk.Label(side, textvariable=self.raw_buttons_var, style="CardMuted.TLabel").pack(anchor="w")
 
@@ -176,6 +236,7 @@ class DashboardTabMixin:
             return
 
         sticks, pressed = pad.read()
+        self._adjust_top_speed(sticks[3])
         self.controller_view.update_state(sticks, pressed)
         if not pad.standard:
             self.raw_buttons_var.set("Pressed: " + (", ".join(sorted(button_label(b) for b in pressed)) or "none"))
@@ -190,9 +251,36 @@ class DashboardTabMixin:
         self.gamepad_pressed = pressed
 
         if self.controller_active and self.motor_channel is not None:
-            self._send_motor_update(sticks)
+            self._send_motor_update(sticks, pressed)
+
+    def _refresh_controls_legend(self):
+        bindings = self.settings["bindings"]
+        order = [b for b in STANDARD_BUTTONS if b in SHORT_BUTTONS]
+        entries = list(LEGEND_DRIVING) + [
+            (SHORT_BUTTONS[b], SHORT_ACTIONS.get(bindings[b], bindings[b]))
+            for b in order if bindings.get(b, "none") != "none"
+        ]
+        cells = [f"{key:>7} {text:<12}" for key, text in entries]
+        rows = [cells[i:i + LEGEND_COLUMNS] for i in range(0, len(cells), LEGEND_COLUMNS)]
+        self.controls_legend_var.set("\n".join("".join(row).rstrip() for row in rows))
+
+    def _adjust_top_speed(self, right_y):
+        """Right stick up raises the top speed, down lowers it, smoothly while held. Saved when let go."""
+        if abs(right_y) < self.settings["deadzone"]:
+            if self.top_speed_changing:
+                self.top_speed_changing = False
+                self._save_setting("max_speed", self.controller_max_speed_var.get())
+            return
+        if not self.top_speed_changing:
+            self.top_speed_changing = True
+            self.top_speed = float(self.controller_max_speed_var.get())
+        self.top_speed -= right_y * SPEED_RATE * TICK_MS / 1000  # pushing up reads as negative
+        self.top_speed = max(MIN_SPEED, min(MAX_SPEED, self.top_speed))
+        self.controller_max_speed_var.set(int(self.top_speed))
 
     def _run_action(self, button):
+        if button in DRIVE_BUTTONS:
+            return  # these drive the robot
         action = self.settings["bindings"].get(button, "none")
         if action == "none":
             return
@@ -353,7 +441,7 @@ class DashboardTabMixin:
         style_button(self.drive_btn, "success", big=True)
         self.controller_status_var.set(f"Couldn't start driving: {error}")
 
-    def _send_motor_update(self, sticks):
+    def _send_motor_update(self, sticks, pressed):
         channel = self.motor_channel
         if channel.exit_status_ready():  # the driver on the robot quit
             error = b""
@@ -363,18 +451,14 @@ class DashboardTabMixin:
             self._stop_driving(f"The robot's motor driver stopped: {lines[-1] if lines else 'no error message'}")
             return
 
-        deadzone = self.settings["deadzone"]
-        x = 0.0 if abs(sticks[0]) < deadzone else sticks[0]
-        y = 0.0 if abs(sticks[1]) < deadzone else sticks[1]
-        max_speed = self.controller_max_speed_var.get()
-        forward = -y * max_speed  # pushing the stick up reads as negative
-        turn = x * max_speed      # pushing it right reads as positive: speed up the left wheel to turn right
-        left = max(-max_speed, min(max_speed, int(forward + turn)))
-        right = max(-max_speed, min(max_speed, int(forward - turn)))
+        left, right, signal = racing_drive(
+            sticks, pressed, self.controller_max_speed_var.get(), self.settings["deadzone"]
+        )
 
         line = f"{left},{right}"
         if not self.hazards_on:
-            signal = turn_signal(left, right) if self.turn_signals_var.get() else "-"
+            if not self.turn_signals_var.get():
+                signal = "-"
             if signal != self.shown_signal:  # only when it changes, so the blinkers don't flicker
                 line += f",{signal}"
                 self.shown_signal = signal
@@ -514,7 +598,8 @@ class ControllerSettingsWindow:
         ttk.Label(
             frame,
             text="Click a button on the picture, or press it on the controller, then choose what it does. "
-            "Buttons don't do anything else while this window is open.",
+            "Buttons don't do anything else while this window is open. ZL, ZR, L, R and the sticks always "
+            "drive: " + DRIVE_HELP + ".",
             style="CardMuted.TLabel", wraplength=int(620 * app.ui_scale), justify="left",
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 12))
 
@@ -553,13 +638,18 @@ class ControllerSettingsWindow:
 
         self.buttons = app.gamepad.buttons() if app.gamepad is not None else list(STANDARD_BUTTONS)
         self._refresh_summary()
-        self.select(self.buttons[0])
+        self.select(next(b for b in self.buttons if b not in DRIVE_BUTTONS))
 
     def select(self, name):
         self.selected = name
         self.view.set_selected(name)
         self.button_var.set(button_label(name))
-        self.action_combo.set(ACTIONS.get(self.app.settings["bindings"].get(name, "none"), "Nothing"))
+        if name in DRIVE_BUTTONS:
+            self.action_combo.set(f"Driving: {DRIVE_BUTTONS[name]}")
+            self.action_combo.config(state="disabled")
+        else:
+            self.action_combo.config(state="readonly")
+            self.action_combo.set(ACTIONS.get(self.app.settings["bindings"].get(name, "none"), "Nothing"))
 
     def _set_action(self):
         label = self.action_combo.get()
@@ -571,6 +661,7 @@ class ControllerSettingsWindow:
             bindings[self.selected] = action
         self.app._save_setting("bindings", bindings)
         self._refresh_summary()
+        self.app._refresh_controls_legend()
 
     def _reset(self):
         defaults = user_settings.DEFAULTS
@@ -579,10 +670,15 @@ class ControllerSettingsWindow:
         self.deadzone_var.set(defaults["deadzone"])
         self.select(self.selected)
         self._refresh_summary()
+        self.app._refresh_controls_legend()
 
     def _refresh_summary(self):
         bindings = self.app.settings["bindings"]
-        entries = [f"{button_label(b):<20}{ACTIONS.get(bindings[b], bindings[b])}" for b in self.buttons if b in bindings]
+        entries = [f"{button_label(b):<20}{text}" for b, text in DRIVE_BUTTONS.items() if b in self.buttons]
+        entries += [
+            f"{button_label(b):<20}{ACTIONS.get(bindings[b], bindings[b])}"
+            for b in self.buttons if b in bindings and b not in DRIVE_BUTTONS
+        ]
         if not entries:
             self.summary_var.set("(none)")
             return

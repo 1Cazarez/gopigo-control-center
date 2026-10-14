@@ -41,7 +41,7 @@ gopigo_control_center/
 ├── main.py              entry point
 ├── app.py                GoPiGoApp -- connection bar, tabs, status bar
 ├── theme.py               colors, fonts, ttk styling
-├── widgets.py              small reusable widgets (BatteryMeter, Compass, ProximityBar, ControllerView)
+├── widgets.py              small reusable widgets (BatteryMeter, Compass, ProximityBar, ControllerView, RobotLightsView)
 ├── gamepad.py               reads game controllers through pygame/SDL
 ├── user_settings.py          saved settings (controller buttons, speed, light states)
 ├── constants.py             shared constants and helpers (venv path, login shell)
@@ -92,7 +92,8 @@ Three things feed it:
   prints one JSON line of readings about five times a second. It reads the distance sensor and IMU
   through `di_sensors` with its cross-process lock on, and it never creates an `EasyGoPiGo3` (whose
   constructor resets the motor speed limit). It looks for the IMU on AD1, AD2 and I2C, in that order.
-- **The controller.** `gamepad.py` reads it about 20 times a second on the Tk thread. Controllers SDL
+- **The controller.** `gamepad.py` reads it about 20 times a second on the Tk thread. Driving uses
+  racing controls (`racing_drive` in `tabs/dashboard_tab.py`); ZL, ZR, L and R are reserved for it. Controllers SDL
   knows get fixed button names; the four face buttons are named by position (`south` is the Switch's
   B), since that's how SDL reports them. Newly pressed buttons run their bound action (see `ACTIONS` in
   `tabs/dashboard_tab.py`); while driving, each read also sends one motor update.

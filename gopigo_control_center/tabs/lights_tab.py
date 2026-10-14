@@ -9,7 +9,8 @@ from tkinter import colorchooser, ttk
 
 import user_settings
 from constants import VENV_ACTIVATE, login_shell
-from theme import BORDER, CARD_BG, MUTED, style_button
+from theme import BORDER, CARD_BG, style_button
+from widgets import RobotLightsView
 
 # Each light: (label, its bit in gopigo3's LED mask -- LED_EYE_LEFT and so on -- takes a color?).
 # Blinkers are single red LEDs.
@@ -28,20 +29,6 @@ LIGHTS_ON_AT_BOOT = {"wifi"}
 # The colors a controller button steps the eyes through.
 EYE_COLORS = [(0, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 255), (255, 0, 255), (255, 140, 0)]
 
-# Turn signals: how much faster one wheel must spin than the other (deg/sec) before the robot counts as turning.
-TURN_SIGNAL_THRESHOLD = 40
-
-
-def turn_signal(left_dps, right_dps):
-    """Which blinker matches this motion: "L" when turning left (right wheel faster), "R" when turning right,
-    or "-" for neither."""
-    if right_dps - left_dps >= TURN_SIGNAL_THRESHOLD:
-        return "L"
-    if left_dps - right_dps >= TURN_SIGNAL_THRESHOLD:
-        return "R"
-    return "-"
-
-
 def _hex(color):
     return "#{:02x}{:02x}{:02x}".format(*color)
 
@@ -58,50 +45,39 @@ class LightsTabMixin:
         self.eye_color_index = 0
         self.turn_signals_var = tk.BooleanVar(value=True)
         self.led_swatches = {}
-        self.led_indicators = {}
         self.led_toggles = {}
         s = self.ui_scale
 
         wrap = ttk.Frame(parent, style="Card.TFrame")
         ttk.Label(wrap, text="Lights", style="Heading.TLabel").pack(anchor="w", pady=(0, 10))
 
+        self.robot_light_views = []
+        self._add_lights_view(wrap, s).pack(anchor="w", pady=(0, 6))
+
         rows = ttk.Frame(wrap, style="Card.TFrame")
         rows.pack(anchor="w")
-        dot = int(18 * s)
         for row, key in enumerate(LIGHTS):
             label, _, has_color = LIGHTS[key]
-            indicator = tk.Canvas(rows, width=dot, height=dot, bg=CARD_BG, highlightthickness=0)
-            indicator.grid(row=row, column=0, padx=(0, 6), pady=5)
-            self.led_indicators[key] = indicator
-            ttk.Label(rows, text=label, style="Card.TLabel").grid(row=row, column=1, sticky="w", padx=(0, 10), pady=5)
+            ttk.Label(rows, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 10), pady=3)
             toggle = style_button(tk.Button(rows, width=9, command=lambda k=key: self._toggle_lights([k], LIGHTS[k][0])))
-            toggle.grid(row=row, column=2, padx=4, pady=5)
+            toggle.grid(row=row, column=1, padx=4, pady=3)
             self.led_toggles[key] = toggle
             if has_color:
                 swatch = tk.Label(
                     rows, width=3, bg=_hex(self.led_colors[key]), cursor="hand2",
                     highlightthickness=1, highlightbackground=BORDER,
                 )
-                swatch.grid(row=row, column=3, sticky="ns", padx=4, pady=5)
+                swatch.grid(row=row, column=2, sticky="ns", padx=4, pady=3)
                 swatch.bind("<Button-1>", lambda e, k=key: self._pick_led_color(k))
                 self.led_swatches[key] = swatch
                 style_button(
                     tk.Button(rows, text="Color...", command=lambda k=key: self._pick_led_color(k)), "neutral"
-                ).grid(row=row, column=4, padx=4, pady=5)
-
-        # The power LED is wired to the power supply: always on, nothing to control.
-        power = tk.Canvas(rows, width=dot, height=dot, bg=CARD_BG, highlightthickness=0)
-        power.grid(row=len(LIGHTS), column=0, padx=(0, 6), pady=5)
-        power.create_oval(2, 2, dot - 2, dot - 2, fill="#3ddc84", outline="")
-        ttk.Label(rows, text="Power", style="Card.TLabel").grid(row=len(LIGHTS), column=1, sticky="w", pady=5)
-        ttk.Label(rows, text="always on while the robot has power", style="CardMuted.TLabel").grid(
-            row=len(LIGHTS), column=2, columnspan=3, sticky="w", padx=4, pady=5
-        )
+                ).grid(row=row, column=3, padx=4, pady=3)
 
         ttk.Label(
             wrap,
-            text="The robot can't report its lights, so this shows what the app last set. On some robot "
-            "images a background service also drives the Wi-Fi LED.",
+            text="The robot can't report its lights, so this shows what the app last set. "
+            "A background service on some robots also drives the Wi-Fi LED.",
             style="CardMuted.TLabel", wraplength=int(330 * s), justify="left",
         ).pack(anchor="w", pady=(6, 0))
 
@@ -119,6 +95,14 @@ class LightsTabMixin:
         self._refresh_light_indicators()
         return wrap
 
+    def _add_lights_view(self, parent, scale):
+        """A drawing of the robot's lights in parent (not yet placed), kept in step with the others."""
+        view = RobotLightsView(parent, scale=scale, on_click=lambda key: self._toggle_lights([key], LIGHTS[key][0]))
+        self.robot_light_views.append(view)
+        if hasattr(self, "led_toggles") and len(self.led_toggles) == len(LIGHTS):
+            view.set_lights(self.light_on, {key: self._on_color(key) for key in LIGHTS})
+        return view
+
     def _record_lights(self, **states):
         """Note which lights are now on or off (light key=True/False): show it, and save it."""
         self.light_on.update(states)
@@ -128,13 +112,11 @@ class LightsTabMixin:
         self._refresh_light_indicators()
 
     def _refresh_light_indicators(self):
-        for key, indicator in self.led_indicators.items():
+        colors = {key: self._on_color(key) for key in LIGHTS}
+        for view in self.robot_light_views:
+            view.set_lights(self.light_on, colors)
+        for key in LIGHTS:
             on = self.light_on[key]
-            size = int(indicator["width"])
-            indicator.delete("all")
-            indicator.create_oval(
-                2, 2, size - 2, size - 2, fill=_hex(self._on_color(key)) if on else "#e2e7ee", outline=MUTED,
-            )
             toggle = self.led_toggles[key]
             toggle.config(text="Turn Off" if on else "Turn On")
             style_button(toggle, "neutral" if on else "success")
@@ -187,7 +169,12 @@ class LightsTabMixin:
         self._set_lights({key: self._on_color(key) if on else OFF for key in keys}, f"{description} {'on' if on else 'off'}")
 
     def _next_eye_color(self):
-        self.eye_color_index = (self.eye_color_index + 1) % len(EYE_COLORS)
+        """Step the eyes through EYE_COLORS, then off, then from the first color again."""
+        eyes_on = self.light_on["left_eye"] or self.light_on["right_eye"]
+        if eyes_on and self.eye_color_index == len(EYE_COLORS) - 1:
+            self._set_lights({"left_eye": OFF, "right_eye": OFF}, "Eyes off")
+            return
+        self.eye_color_index = self.eye_color_index + 1 if eyes_on else 0
         color = EYE_COLORS[self.eye_color_index]
         for key in ("left_eye", "right_eye"):
             self.led_colors[key] = color

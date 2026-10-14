@@ -5,12 +5,16 @@ the robot over your network. Tabs:
 
 - **Dashboard** -- the control center: the live camera picture, battery, distance sensor, IMU
   (compass, roll, pitch, gyro) and wheel encoders, and a game controller drawn on screen showing
-  what you press. Drive with a Nintendo Switch Pro Controller (or Joy-Con, or another gamepad), and
-  choose what its buttons do -- blinkers, hazard lights, eyes, speed, camera and more -- in
-  **Controller Settings**. Your choices are saved in `~/.gopigo_control_center.json`.
+  what you press. Drive with a Nintendo Switch Pro Controller (or Joy-Con, or another gamepad) using
+  racing controls: **ZR** gas, **ZL** brake/reverse, **left stick** steers (while moving, like a car),
+  hold **L**/**R** to spin on the spot, and the **right stick** up/down raises or lowers the top speed.
+  Choose what the other buttons do -- blinkers, hazard lights, eye colors (X steps through them, then
+  off), camera and more -- in **Controller Settings**; a legend on the Dashboard lists what every
+  button does, and a drawing of the robot shows which lights should be on. Your choices are saved in
+  `~/.gopigo_control_center.json`.
 - **Manual Control** -- drive with on-screen buttons, watch the same sensors, and set the board's
-  lights: the two eye LEDs (with colors), the two red blinkers and the Wi-Fi LED. Each light shows
-  whether it's on. The board can't report its lights, so the app remembers what it last set (in the
+  lights: the two eye LEDs (with colors), the two red blinkers and the Wi-Fi LED, on a drawing of the
+  robot that shows which are on (click a light to switch it). The board can't report its lights, so the app remembers what it last set (in the
   same settings file), and after the robot reboots it goes back to the robot's defaults: only the Wi-Fi
   LED on. The blinkers can also act as turn signals, lighting up on the side the robot turns toward.
 - **Jupyter & Camera** -- launch JupyterLab on the robot, watch a live camera stream, take photos.

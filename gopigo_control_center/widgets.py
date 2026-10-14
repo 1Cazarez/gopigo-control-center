@@ -212,3 +212,71 @@ class ControllerView(tk.Canvas):
             if not enabled:
                 self.sticks, self.pressed = (0.0, 0.0, 0.0, 0.0), set()
             self._draw()
+
+
+class RobotLightsView(tk.Canvas):
+    """A top-down sketch of the robot (front at the top) with its lights where they sit on the board.
+
+    Lit lights show in their color. Clicking a light calls on_click(key); the power light is always on and
+    can't be clicked. Hovering names the light.
+    """
+
+    WIDTH, HEIGHT = 200, 190
+    BOARD = "#c0392b"   # the GoPiGo3 board is red
+    UNLIT = "#5a2620"
+    # key: (x, y, radius, name)
+    SPOTS = {
+        "left_blinker": (54, 40, 6, "Left blinker"),
+        "left_eye": (80, 44, 10, "Left eye"),
+        "right_eye": (120, 44, 10, "Right eye"),
+        "right_blinker": (146, 40, 6, "Right blinker"),
+        "wifi": (100, 116, 8, "Wi-Fi LED"),
+    }
+    POWER = (100, 142, 5)
+
+    def __init__(self, parent, scale=1.0, on_click=None, bg=CARD_BG, **kwargs):
+        self.s = scale
+        super().__init__(
+            parent, width=int(self.WIDTH * scale), height=int(self.HEIGHT * scale), bg=bg, highlightthickness=0,
+            **kwargs,
+        )
+        self.on_click = on_click
+        self.states, self.colors = {}, {}
+        self.hover = ""
+        self._draw()
+
+    def _xy(self, *coords):
+        return [v * self.s for v in coords]
+
+    def set_lights(self, states, colors):
+        """states: {key: on?}; colors: {key: (r, g, b)} for the lights that are on."""
+        self.states, self.colors = dict(states), dict(colors)
+        self._draw()
+
+    def _draw(self):
+        self.delete("all")
+        self.create_text(*self._xy(100, 9), text="▲ front", fill=MUTED, font=FONT_MONO_SMALL)
+        self.create_rectangle(*self._xy(22, 70, 40, 140), fill=TEXT, outline="")    # wheels
+        self.create_rectangle(*self._xy(160, 70, 178, 140), fill=TEXT, outline="")
+        self.create_rectangle(*self._xy(40, 22, 160, 160), fill=self.BOARD, outline="")
+        for key, (x, y, r, name) in self.SPOTS.items():
+            on = self.states.get(key, False)
+            fill = "#{:02x}{:02x}{:02x}".format(*self.colors[key]) if on and key in self.colors else self.UNLIT
+            if on:  # a soft halo so a lit light reads as lit
+                self.create_oval(*self._xy(x - r - 4, y - r - 4, x + r + 4, y + r + 4), outline=fill, width=2, tags=(key,))
+            self.create_oval(*self._xy(x - r, y - r, x + r, y + r), fill=fill, outline="#ffffff", width=1, tags=(key,))
+            self.tag_bind(key, "<Enter>", lambda e, n=name: self._set_hover(n))
+            self.tag_bind(key, "<Leave>", lambda e: self._set_hover(""))
+            if self.on_click is not None:
+                self.tag_bind(key, "<Button-1>", lambda e, k=key: self.on_click(k))
+        x, y, r = self.POWER
+        self.create_oval(*self._xy(x - r, y - r, x + r, y + r), fill="#3ddc84", outline="", tags=("power",))
+        self.tag_bind("power", "<Enter>", lambda e: self._set_hover("Power (always on)"))
+        self.tag_bind("power", "<Leave>", lambda e: self._set_hover(""))
+        self.create_text(*self._xy(100, 177), text=self.hover or "click to switch", fill=MUTED,
+                         font=FONT_MONO_SMALL)
+
+    def _set_hover(self, text):
+        self.hover = text
+        self.config(cursor="hand2" if text and not text.startswith("Power") and self.on_click else "")
+        self._draw()
