@@ -1,5 +1,5 @@
-"""Autopilot tab -- the robot drives itself from grid cell to grid cell along a path you draw, going around
-obstacles, with the live camera, face detection, sensors and a log of incidents.
+"""Autopilot tab -- the robot drives itself from grid cell to grid cell along a path you draw, taking the
+shortest way round cells that turn out to be blocked, with the live camera, face detection, sensors and a log of incidents.
 
 The driving runs on the robot (NAVIGATOR_SCRIPT in remote_scripts.py) so Wi-Fi lag can't upset it. This tab
 sends it the plan, pings it every half second (it stops if the pings stop), tells it when the camera sees a
@@ -48,7 +48,7 @@ def route(a, b):
 class PathGrid(tk.Canvas):
     """The grid the robot drives on, top = the way the robot faces when it's "up". Click cells to lay a path."""
 
-    STATE_COLORS = {"going": "#fff3c4", "reached": "#d4f5e2", "occupied": "#f8d7d4", "gave up": "#f8d7d4", "stuck": "#f8d7d4"}
+    STATE_COLORS = {"going": "#fff3c4", "reached": "#d4f5e2", "blocked": "#f8d7d4", "skipped": "#f8d7d4", "stuck": "#f8d7d4"}
 
     def __init__(self, parent, size, on_change=None):
         super().__init__(parent, width=size, height=size, bg=CARD_BG, highlightthickness=0)
@@ -128,7 +128,7 @@ class PathGrid(tk.Canvas):
                 x0, y0 = 4 + c * p, 4 + r * p
                 fill = self.STATE_COLORS.get(self.states.get((r, c)), "#ffffff")
                 self.create_rectangle(x0, y0, x0 + p, y0 + p, fill=fill, outline=BORDER)
-                if self.states.get((r, c)) in ("occupied", "gave up", "stuck"):
+                if self.states.get((r, c)) in ("blocked", "skipped", "stuck"):
                     self.create_line(x0 + 6, y0 + 6, x0 + p - 6, y0 + p - 6, fill=DANGER, width=2)
                     self.create_line(x0 + p - 6, y0 + 6, x0 + 6, y0 + p - 6, fill=DANGER, width=2)
         if len(self.path) > 1:
@@ -206,7 +206,7 @@ class AutopilotTabMixin:
         side.grid(row=0, column=1, rowspan=2, sticky="nsew")
 
         ttk.Label(side, text="Path (click cells; S = start)", style="CardBold.TLabel").pack(anchor="w")
-        self.path_grid = PathGrid(side, int(250 * s), on_change=self._on_path_changed)
+        self.path_grid = PathGrid(side, int(250 * s), on_change=self._on_path_edited)
         self.path_grid.pack(anchor="w", pady=(4, 4))
         edit = ttk.Frame(side, style="Card.TFrame")
         edit.pack(anchor="w")
@@ -221,8 +221,9 @@ class AutopilotTabMixin:
         self.nav_cell_var = tk.IntVar(value=50)
         self.nav_facing_var = tk.StringVar(value="up")
         self.nav_speed_var = tk.IntVar(value=150)
-        self.nav_vision_var = tk.BooleanVar(value=True)
+        self.nav_vision_var = tk.BooleanVar(value=False)  # it mistakes tape, rugs and shadows for obstacles
         self.nav_eyes_var = tk.BooleanVar(value=True)
+        self.nav_pause_var = tk.BooleanVar(value=True)
         self.nav_low_battery_var = tk.DoubleVar(value=self.settings.get("low_battery_v", 9.0))
 
         def spin(row, label, var, low, high, step=1, col=0):
@@ -248,6 +249,8 @@ class AutopilotTabMixin:
                        activebackground=CARD_BG, highlightthickness=0).grid(row=3, column=0, columnspan=4, sticky="w")
         tk.Checkbutton(form, text="Eyes: red for a face, yellow going round an obstacle", variable=self.nav_eyes_var,
                        bg=CARD_BG, activebackground=CARD_BG, highlightthickness=0).grid(row=4, column=0, columnspan=4, sticky="w")
+        tk.Checkbutton(form, text="Pause while a face is in view", variable=self.nav_pause_var, bg=CARD_BG,
+                       activebackground=CARD_BG, highlightthickness=0).grid(row=5, column=0, columnspan=4, sticky="w")
 
         run = ttk.Frame(side, style="Card.TFrame")
         run.pack(anchor="w", pady=(8, 0))
@@ -283,6 +286,15 @@ class AutopilotTabMixin:
         if (rows, cols) != (self.path_grid.rows, self.path_grid.cols):
             self.path_grid.configure_grid(rows, cols)
 
+    def _on_path_edited(self):
+        """Point the robot along the path's first step, so it starts by driving straight ahead."""
+        path = self.path_grid.path
+        if len(path) > 1:
+            (r, c), (r2, c2) = path[0], path[1]
+            if (r, c) != (r2, c2):
+                self.nav_facing_var.set("up" if r2 < r else "down" if r2 > r else "left" if c2 < c else "right")
+        self._on_path_changed()
+
     def _on_path_changed(self):
         self.path_grid.facing = FACINGS[self.nav_facing_var.get()]
         self.path_grid.draw()
@@ -314,12 +326,15 @@ class AutopilotTabMixin:
             return
         r0, c0 = path[0]
         self.nav_plan = {
-            "targets": [{"x": (c - c0) * cell, "y": (r0 - r) * cell, "cell": [r, c]} for r, c in path[1:]],
+            "targets": [[r, c] for r, c in path[1:]],
+            "rows": self.path_grid.rows,
+            "cols": self.path_grid.cols,
             "heading": FACINGS[self.nav_facing_var.get()],
             "speed": speed,
             "stop_cm": self.settings["obstacle_stop_cm"],
             "vision": self.nav_vision_var.get(),
             "eyes": self.nav_eyes_var.get(),
+            "pause_for_faces": self.nav_pause_var.get(),
             "turn_signals": self.turn_signals_var.get(),
             "cell_cm": cell,
             "start": [r0, c0],
@@ -420,6 +435,9 @@ class AutopilotTabMixin:
             self.path_grid.draw()
             if m["state"] != "going":
                 self.nav_status_var.set(f"Cell {m['index'] + 1} of {len(self.nav_plan['targets'])}: {m['state']}.")
+        elif kind == "blocked":
+            self.path_grid.states[tuple(m["cell"])] = "blocked"
+            self.path_grid.draw()
         elif kind == "sensors":
             self.nav_battery.set_voltage(m.get("battery"))
             cm = m.get("distance_cm")
@@ -441,6 +459,8 @@ class AutopilotTabMixin:
             self._record_lights(left_eye=on, right_eye=on)
         elif kind == "incident":
             self._log_incident(m["kind"], m["msg"], m.get("cell"))
+            if m["kind"] in ("paused", "resumed"):
+                self.nav_status_var.set("Paused: a face is in view." if m["kind"] == "paused" else "Running.")
         elif kind == "log":
             self.nav_status_var.set(m["msg"])
         elif kind == "done":

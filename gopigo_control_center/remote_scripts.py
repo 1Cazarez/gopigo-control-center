@@ -539,17 +539,21 @@ while True:
 # CAMERA_STREAM_PORT, like the camera stream). If asked, it also uses the
 # picture to spot obstacles: it learns what the floor looks like at the start
 # and treats anything just ahead that doesn't look like floor as an obstacle.
-# A blocked leg is detoured -- step sideways (to the clearer side, by the
-# camera), drive past, come back onto the path -- and an obstacle on the
-# target cell itself means that cell is skipped. The eyes go yellow while it
-# gets round an obstacle and red while the app reports a face.
+# It only ever drives straight from one cell's centre to the next one's. If
+# something is in the way it backs up to the centre it left, marks that cell
+# blocked and takes the shortest way round through free cells of the grid (it
+# never leaves the grid); a target cell that is blocked, or can't be reached,
+# is skipped. The eyes go yellow while it takes the long way round an obstacle
+# and red while the app reports a face; if asked
+# ("pause_for_faces"), it also stands still until the face has gone.
 #
 # It stops the motors when told to, when stdin closes (the app quit or the
 # connection dropped), or when the pings stop for PING_TIMEOUT seconds (a
 # connection that hangs without closing).
 REMOTE_NAVIGATOR_PATH = f"{REMOTE_KERNEL_DIR}/navigator.py"
 
-NAVIGATOR_SCRIPT = r'''import io
+NAVIGATOR_SCRIPT = r'''import collections
+import io
 import json
 import math
 import socketserver
@@ -564,15 +568,7 @@ PING_TIMEOUT = 2.0        # seconds without word from the app before stopping
 LOOP = 0.05               # seconds between checks while moving
 ARRIVED_DEGREES = 5       # wheel degrees from the target that count as there
 STUCK_SECONDS = 2.5       # no wheel progress this long while driving: stuck
-SIDE_CM = 30              # how far to step sideways around an obstacle
-PASS_EXTRA_CM = 30        # drive alongside it this far past where it starts (plus the robot's own length)
-ROBOT_LENGTH_CM = 20
-PASS_MORE_CM = 15         # extra distance per try while it's still beside the robot
-REJOIN_TRIES = 4
-DETOURS_PER_CELL = 3
-OCCUPIED_MARGIN_CM = 12   # an obstacle this close past the target point means the cell itself is taken
-SENSOR_AHEAD_CM = 10      # the distance sensor sits this far in front of the wheels (where position is kept)
-CREEP_GAP_CM = 5          # finishing a leg short of an obstacle is fine if this much room is left in front
+CREEP_GAP_CM = 5          # an obstacle past the end of the leg is fine if this much room is left in front
 VISION_BLOCKED = 0.30     # share of the view just ahead that must look unlike the floor to count as blocked
 STREAM_PORT = 8000
 FRAME_SIZE = (320, 240)
@@ -754,12 +750,6 @@ class Camera:
     def looks_blocked(self):
         return self.ok and self.center > VISION_BLOCKED
 
-    def clearer_side(self):
-        """+1 (right) or -1 (left), whichever looks clearer; None without the camera."""
-        if not self.ok:
-            return None
-        return 1 if self.right <= self.left else -1
-
     def close(self):
         try:
             if self.cam is not None:
@@ -778,6 +768,8 @@ class Navigator:
         self.heading = plan["heading"]  # degrees clockwise from north (the top of the grid)
         self.wheel_mm = gpg.WHEEL_CIRCUMFERENCE
         self.base_mm = getattr(gpg, "WHEEL_BASE_CIRCUMFERENCE", 117 * math.pi)
+        self.here = tuple(plan["start"])  # the cell it's in (or last left)
+        self.blocked_cells = set()
         self.cell = None
         self.avoiding = False
         self.eye_color = None
@@ -794,10 +786,11 @@ class Navigator:
             return None
         return mm / 10 if 0 < mm < 3000 else None
 
-    def blocked(self):
-        """None if the way ahead is clear, otherwise what's blocking it, for the incident log."""
+    def blocked(self, left_to_go):
+        """None if the way ahead is clear for the left_to_go cm still to drive, otherwise what's blocking it, for
+        the incident log. Something past the end of the leg (a wall beyond the last cell) doesn't count."""
         cm = self.distance_ahead_cm()
-        if cm is not None and cm <= self.stop_cm:
+        if cm is not None and cm <= self.stop_cm and cm < left_to_go + CREEP_GAP_CM:
             return f"distance sensor: {cm:.0f} cm"
         if self.use_vision and self.camera.looks_blocked():
             return "camera"
@@ -829,9 +822,9 @@ class Navigator:
     def encoders(self):
         return self.gpg.get_motor_encoder(self.gpg.MOTOR_LEFT), self.gpg.get_motor_encoder(self.gpg.MOTOR_RIGHT)
 
-    def _move(self, left_deg, right_deg, watch):
+    def _move(self, left_deg, right_deg, watch_cm=None):
         """Turn the wheels by these amounts. Returns (result, left moved, right moved, why); result is "done",
-        "blocked" (watch=True and something's ahead) or "stuck". Raises Stopped when told to stop."""
+        "blocked" (driving a watch_cm leg and something's in the way) or "stuck". Raises Stopped when told to stop."""
         g = self.gpg
         l0, r0 = self.encoders()
         g.set_motor_position(g.MOTOR_LEFT, l0 + left_deg)
@@ -842,10 +835,20 @@ class Navigator:
                 g.stop()
                 raise Stopped()
             self.housekeeping()
+            if self.plan.get("pause_for_faces") and face_seen[0]:
+                g.stop()
+                self.wait_while_face()
+                # Carry on to the same targets, so the move still ends where it should.
+                g.set_motor_position(g.MOTOR_LEFT, l0 + left_deg)
+                g.set_motor_position(g.MOTOR_RIGHT, r0 + right_deg)
+                last_progress = time.time()
             l, r = self.encoders()
             if abs(l - l0 - left_deg) <= ARRIVED_DEGREES and abs(r - r0 - right_deg) <= ARRIVED_DEGREES:
                 return "done", l - l0, r - r0, None
-            why = self.blocked() if watch else None
+            why = None
+            if watch_cm is not None:
+                driven_cm = (abs(l - l0) + abs(r - r0)) / 2 / 360 * self.wheel_mm / 10
+                why = self.blocked(watch_cm - driven_cm)
             if why:
                 g.stop()
                 time.sleep(0.15)
@@ -858,10 +861,21 @@ class Navigator:
                 return "stuck", l - l0, r - r0, None
             time.sleep(LOOP)
 
+    def wait_while_face(self):
+        """Stand still while the app sees a face, then return. Raises Stopped if told to stop meanwhile."""
+        self.incident("paused", "A face is in view: waiting until it's gone.")
+        while face_seen[0]:
+            if stop_event.is_set():
+                raise Stopped()
+            self.housekeeping()
+            time.sleep(LOOP)
+        self.incident("resumed", "No face in view any more: carrying on.")
+
     def drive(self, cm, watch=True):
-        """Drive forward cm (watching for obstacles). Returns (result, cm driven, why it stopped)."""
+        """Drive forward cm, or back for negative cm (watching for obstacles going forward). Returns (result,
+        cm driven, why it stopped)."""
         wheel_deg = cm * 10 / self.wheel_mm * 360
-        result, dl, dr, why = self._move(wheel_deg, wheel_deg, watch)
+        result, dl, dr, why = self._move(wheel_deg, wheel_deg, cm if watch and cm > 0 else None)
         moved = (dl + dr) / 2 / 360 * self.wheel_mm / 10
         self.x += moved * math.sin(math.radians(self.heading))
         self.y += moved * math.cos(math.radians(self.heading))
@@ -875,7 +889,7 @@ class Navigator:
         self.signal(degrees)
         wheel_deg = self.base_mm * degrees / 360 / self.wheel_mm * 360
         try:
-            _, dl, dr, _ = self._move(wheel_deg, -wheel_deg, watch=False)
+            _, dl, dr, _ = self._move(wheel_deg, -wheel_deg)
         finally:
             self.signal(0)
         turned = (dl - dr) / 2 / 360 * self.wheel_mm / self.base_mm * 360
@@ -896,98 +910,77 @@ class Navigator:
         emit("pose", x=round(self.x, 1), y=round(self.y, 1), heading=round(self.heading))
 
     # ---- navigating ----
-    def offset_from(self, origin, heading):
-        """How far right (+) or left (-) of the line through origin along heading the robot is."""
-        h = math.radians(heading)
-        return (self.x - origin[0]) * math.cos(h) - (self.y - origin[1]) * math.sin(h)
+    def centre(self, cell):
+        """Where a cell's centre is, in cm east and north of the start."""
+        (r0, c0), cell_cm = self.plan["start"], self.plan["cell_cm"]
+        return (cell[1] - c0) * cell_cm, (r0 - cell[0]) * cell_cm
 
-    def go_around(self, line_heading, left_to_go):
-        """Detour around whatever is ahead and come back onto the line, no farther along than needed to reach
-        the target left_to_go cm ahead. True if it got back on."""
-        origin = (self.x, self.y)
-        first = self.camera.clearer_side() if self.use_vision else None
-        side = None
-        for s in (first or 1, -(first or 1)):
-            want = s * SIDE_CM - self.offset_from(origin, line_heading)
-            self.face(line_heading + (90 if want > 0 else -90))
-            result, _, _ = self.drive(abs(want))
-            if result == "done":
-                side = s
-                break
-            emit("log", msg=f"The {'right' if s > 0 else 'left'} side is blocked too.")
-        if side is None:
-            return False
-        emit("log", msg=f"Going around on the {'right' if side > 0 else 'left'}.")
-        self.face(line_heading)
-        # The obstacle starts about stop distance + sensor offset ahead of where the robot was blocked; get the
-        # whole robot past its near part before cutting back. Deeper obstacles are found when cutting back.
-        passing = self.stop_cm + SENSOR_AHEAD_CM + ROBOT_LENGTH_CM + PASS_EXTRA_CM
-        result, _, _ = self.drive(min(passing, left_to_go + ROBOT_LENGTH_CM / 2))
-        if result != "done":
-            return False
-        for _ in range(REJOIN_TRIES):
-            back = self.offset_from(origin, line_heading)
-            self.face(line_heading + (-90 if back > 0 else 90))
-            result, _, _ = self.drive(abs(back))
-            self.face(line_heading)
-            if result == "done":
-                emit("log", msg="Back on the path.")
-                return True
-            result, _, _ = self.drive(PASS_MORE_CM)  # still beside it: go a bit further and try again
-            if result != "done":
-                return False
-        return False
+    def route(self, goal):
+        """The shortest way from here to goal through free cells of the grid, as the cells to step to in turn,
+        or None if there's none."""
+        rows, cols = self.plan["rows"], self.plan["cols"]
+        came_from = {self.here: None}
+        queue = collections.deque([self.here])
+        while queue:
+            cell = queue.popleft()
+            if cell == goal:
+                steps = []
+                while cell != self.here:
+                    steps.append(cell)
+                    cell = came_from[cell]
+                return steps[::-1]
+            r, c = cell
+            for nxt in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+                if (0 <= nxt[0] < rows and 0 <= nxt[1] < cols and nxt not in came_from
+                        and nxt not in self.blocked_cells):
+                    came_from[nxt] = cell
+                    queue.append(nxt)
+        return None
 
-    def go_to(self, tx, ty):
-        """Drive to (tx, ty). Returns "reached", "occupied" (something sits on it), "gave up" or "stuck"."""
-        for detours in range(DETOURS_PER_CELL + 1):
-            dx, dy = tx - self.x, ty - self.y
-            distance = math.hypot(dx, dy)
-            if distance < 2:
-                return "reached"
-            heading = math.degrees(math.atan2(dx, dy)) % 360
-            self.face(heading)
-            result, moved, why = self.drive(distance)
-            if result == "done":
-                return "reached"
-            if result == "stuck":
+    def step_to(self, cell):
+        """Drive to the centre of a neighbouring cell. Returns "done", "stuck" or "blocked" -- then it has
+        backed up to the centre of the cell it left and marked this one blocked."""
+        tx, ty = self.centre(cell)
+        dx, dy = tx - self.x, ty - self.y
+        self.face(math.degrees(math.atan2(dx, dy)) % 360)
+        result, moved, why = self.drive(math.hypot(dx, dy))
+        if result == "done":
+            self.here = cell
+        elif result == "blocked":
+            self.blocked_cells.add(cell)
+            emit("blocked", cell=list(cell))
+            self.incident("obstacle", f"Something in the way ({why}); cell {cell[0]},{cell[1]} marked blocked.")
+            self.drive(-moved, watch=False)
+        return result
+
+    def go_to(self, goal):
+        """Drive to a cell, cell by cell, the shortest way round blocked ones. Returns "reached", "skipped" or
+        "stuck"."""
+        while self.here != goal:
+            if goal in self.blocked_cells:
+                self.incident("obstacle", "Something is on this cell; skipping it.")
+                return "skipped"
+            steps = self.route(goal)
+            if steps is None:
+                self.incident("obstacle", "No way to this cell round the blocked ones; skipping it.")
+                return "skipped"
+            self.avoiding = len(steps) > abs(goal[0] - self.here[0]) + abs(goal[1] - self.here[1])
+            if self.step_to(steps[0]) == "stuck":
                 return "stuck"
-            left_to_go = distance - moved
-            ahead = self.distance_ahead_cm()
-            if ahead is not None:  # the distance sensor says how far away it is
-                obstacle_at = ahead + SENSOR_AHEAD_CM  # from the robot's centre, along the leg
-                if obstacle_at - left_to_go - SENSOR_AHEAD_CM >= CREEP_GAP_CM:
-                    # It's beyond the target: the stop distance kept the robot back, but there's room to finish.
-                    result, _, _ = self.drive(left_to_go, watch=False)
-                    return "reached" if result == "done" else "stuck"
-                if obstacle_at >= left_to_go - OCCUPIED_MARGIN_CM:  # it sits on or right around the target
-                    self.incident("obstacle", f"Something is on the target cell ({why}); skipping it.")
-                    return "occupied"
-            if detours == DETOURS_PER_CELL:
-                self.incident("obstacle", f"Still blocked after {DETOURS_PER_CELL} detours ({why}); giving up on this cell.")
-                return "gave up"
-            self.incident("obstacle", f"Obstacle ahead ({why}); going around it.")
-            self.avoiding = True
-            try:
-                rejoined = self.go_around(heading, left_to_go)
-            finally:
-                self.avoiding = False
-                self.housekeeping()
-            if not rejoined:
-                self.incident("obstacle", "Couldn't get around the obstacle; giving up on this cell.")
-                return "gave up"
-        return "gave up"
+        return "reached"
 
     def run(self):
-        for i, target in enumerate(self.plan["targets"]):
-            self.cell = target["cell"]
-            emit("step", index=i, cell=self.cell, state="going")
-            result = self.go_to(target["x"], target["y"])
-            emit("step", index=i, cell=self.cell, state=result)
+        for i, cell in enumerate(self.plan["targets"]):
+            self.cell = cell
+            emit("step", index=i, cell=cell, state="going")
+            try:
+                result = self.go_to(tuple(cell))
+            finally:
+                self.avoiding = False
+            emit("step", index=i, cell=cell, state=result)
             if result == "stuck":
                 self.incident("stuck", "The wheels stopped turning -- the robot may be caught on something. Stopping.")
                 return
-
 
 def main():
     plan = json.loads(sys.stdin.readline())

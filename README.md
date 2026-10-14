@@ -27,10 +27,14 @@ the robot over your network. Tabs:
 - **Autopilot** -- the robot drives itself. Draw a path on a grid (click cells, or use Snake or
   Perimeter), set the cell size and which way the robot faces, put it on the start cell and click Start.
   It keeps track of where it is from the wheel encoders and watches the distance sensor and, if you
-  like, the camera: something in the way gets driven around, and a cell with something on it is
-  skipped. The tab shows the live picture with faces boxed, the robot's position on the grid, the
-  battery and the distance ahead. The eyes turn red when a face is in view and yellow while it gets
-  round an obstacle. **Incidents** (faces, obstacles, skipped cells, getting stuck, a low battery --
+  like, the camera (off by default: it can mistake tape or shadows on the floor for obstacles). It
+  only drives straight between cell centres; if something is in the way it backs up, marks that cell
+  blocked and takes the shortest way round through free cells, never leaving the grid. A target cell
+  that's blocked or can't be reached is skipped. Nothing needs marking on the floor -- just put the
+  robot on the start cell facing the arrow. The tab shows the live picture with faces boxed, the robot's position on the grid, the
+  battery and the distance ahead. The eyes turn red when a face is in view and yellow while it takes
+  the long way round a blocked cell. It also stops and waits while a face is in view, then carries on (the "Pause while a
+  face is in view" option, on by default). **Incidents** (faces, obstacles, skipped cells, getting stuck, a low battery --
   the threshold is adjustable for your rechargeable packs) are listed in the tab and appended to
   `gopigo_logs/autopilot_incidents.csv`, with a photo of each face in `gopigo_logs/faces/`. The
   autopilot stops when you click STOP or Emergency Stop, drive by hand, disconnect, or if the app
