@@ -23,7 +23,7 @@ class SensorTabMixin:
         )
 
         ttk.Label(wrap, text="Battery:", style="Card.TLabel").grid(row=1, column=0, sticky="e", padx=8, pady=6)
-        self.battery_meter = BatteryMeter(wrap)
+        self.battery_meter = BatteryMeter(wrap, scale=self.ui_scale)
         self.battery_meter.grid(row=1, column=1, sticky="w", padx=8)
 
         ttk.Label(wrap, text="Distance sensor:", style="Card.TLabel").grid(

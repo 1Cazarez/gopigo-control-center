@@ -13,10 +13,12 @@ from dependencies import paramiko, pygame
 from tabs import (
     BlocksTabMixin,
     CodeTabMixin,
-    ControllerTabMixin,
+    DashboardTabMixin,
     DriveTabMixin,
+    EducationTabMixin,
     FilesTabMixin,
     JupyterCameraTabMixin,
+    LightsTabMixin,
     NotebookTabMixin,
     SensorTabMixin,
     WifiTabMixin,
@@ -36,10 +38,15 @@ WATCH_MISSES = 2
 KEEPALIVE_SECONDS = 20
 
 
+def text_scale(root):
+    """How much larger than normal text renders here (1.0 or more). Drawings scale by this to match."""
+    line_height = tkfont.Font(root=root, font=FONT_BASE).metrics("linespace")
+    return max(1.0, line_height / NORMAL_LINE_HEIGHT)
+
+
 def initial_geometry(root):
     """A window size that suits how large text really renders here, without overflowing the screen."""
-    line_height = tkfont.Font(root=root, font=FONT_BASE).metrics("linespace")
-    scale = max(1.0, line_height / NORMAL_LINE_HEIGHT)
+    scale = text_scale(root)
     width = min(int(BASE_WIDTH * scale), root.winfo_screenwidth() - 100)
     height = min(int(BASE_HEIGHT * scale), root.winfo_screenheight() - 140)
     return f"{max(width, 640)}x{max(height, 480)}"
@@ -50,17 +57,20 @@ class GoPiGoApp(
     NotebookTabMixin,
     BlocksTabMixin,
     DriveTabMixin,
-    ControllerTabMixin,
+    LightsTabMixin,
     SensorTabMixin,
     FilesTabMixin,
     JupyterCameraTabMixin,
     WifiTabMixin,
+    EducationTabMixin,
+    DashboardTabMixin,
 ):
     def __init__(self, root):
         self.root = root
         self.root.title("GoPiGo Control Center")
         self.root.geometry(initial_geometry(root))
         init_style(root)
+        self.ui_scale = text_scale(root)
 
         self.ssh_client = None
         self.current_filepath = None
@@ -76,10 +86,9 @@ class GoPiGoApp(
         # Block Builder: local web server, started the first time the tab's button is clicked
         self.block_server = None
 
-        # Controller-drive state
+        # Controller-drive state (Dashboard tab)
         self.motor_channel = None
         self.controller_active = False
-        self.joystick = None
 
         # JupyterLab launch state
         self.jupyter_channel = None
@@ -289,7 +298,7 @@ class GoPiGoApp(
         self._on_jupyter_stopped()
         self._on_camera_stopped()
         self.poll_btn.config(text="Start Live Sensors", bg="#2ea36f")
-        self.controller_toggle_btn.config(text="Start Controller Mode", bg="#2ea36f")
+        self._dashboard_on_disconnect()
         self.battery_meter.set_voltage(None)
         self._set_status("Disconnected.")
 
@@ -304,35 +313,41 @@ class GoPiGoApp(
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=8)
 
+        self.dashboard_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.code_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook_cells_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.blocks_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.drive_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.controller_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.lights_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.sensor_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.files_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.jupyter_camera_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.wifi_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.education_tab = ttk.Frame(self.notebook, style="Card.TFrame")
 
+        self.notebook.add(self.dashboard_tab, text="Dashboard")
         self.notebook.add(self.code_tab, text="Code Editor & Run")
         self.notebook.add(self.notebook_cells_tab, text="Notebook Cells")
         self.notebook.add(self.blocks_tab, text="Block Builder")
         self.notebook.add(self.drive_tab, text="Manual Drive")
-        self.notebook.add(self.controller_tab, text="Controller")
+        self.notebook.add(self.lights_tab, text="Lights")
         self.notebook.add(self.sensor_tab, text="Live Sensors")
         self.notebook.add(self.files_tab, text="Remote Files")
         self.notebook.add(self.jupyter_camera_tab, text="Jupyter & Camera")
         self.notebook.add(self.wifi_tab, text="Wi-Fi")
+        self.notebook.add(self.education_tab, text="Education")
 
         self._build_code_tab()
         self._build_notebook_cells_tab()
         self._build_blocks_tab()
         self._build_drive_tab()
-        self._build_controller_tab()
+        self._build_lights_tab()
         self._build_sensor_tab()
         self._build_files_tab()
         self._build_jupyter_camera_tab()
         self._build_wifi_tab()
+        self._build_education_tab()
+        self._build_dashboard_tab()  # last: it shows the camera status the Jupyter & Camera tab keeps
 
     # ---------------- Status bar ----------------
     def _build_status_bar(self):

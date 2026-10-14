@@ -3,15 +3,26 @@
 A desktop app for programming a GoPiGo3 robot over SSH. It runs on your own computer and talks to
 the robot over your network. Tabs:
 
+- **Dashboard** -- the control center: the live camera picture, battery, distance sensor, IMU
+  (compass, roll, pitch, gyro) and wheel encoders, and a game controller drawn on screen showing
+  what you press. Drive with a Nintendo Switch Pro Controller (or Joy-Con, or another gamepad), and
+  choose what its buttons do -- blinkers, hazard lights, eyes, speed, camera and more -- in
+  **Controller Settings**. Your choices are saved in `~/.gopigo_control_center.json`.
 - **Code Editor & Run** -- write a script, send it to the robot, run it, and watch live output.
 - **Notebook Cells** -- Jupyter-style cells that share variables between runs.
 - **Block Builder** -- drag-and-drop block coding ([Blockly](https://developers.google.com/blockly))
   that generates Python and runs it on the robot. It opens in your web browser.
-- **Manual Drive** and **Controller** -- drive with buttons or a game controller.
-- **Live Sensors** -- battery meter, distance sensor, gyro.
+- **Manual Drive** -- drive with on-screen buttons.
+- **Lights** -- turn the board's LEDs on and off and pick colors: the two eye LEDs, the two red
+  blinkers and the Wi-Fi LED. The blinkers can also act as turn signals, lighting up on the side the
+  robot turns toward in Manual Drive and on the Dashboard.
+- **Live Sensors** -- battery meter, distance sensor, gyro (a slower, simpler view than the Dashboard's).
 - **Remote Files** -- browse and open the robot's `.py` files.
 - **Jupyter & Camera** -- launch JupyterLab on the robot, watch a live camera stream, take photos.
 - **Wi-Fi** -- scan for networks, save new ones and switch the robot between them.
+- **Education** -- read course lessons (exercises and assignments) inside the app. Each lesson is a
+  Markdown file in [`gopigo_control_center/lessons/`](gopigo_control_center/lessons/); add a `.md` file
+  there and it appears in the lesson picker.
 
 ## What you need
 
@@ -34,7 +45,7 @@ the robot over your network. Tabs:
 - Optional, only for the matching features:
   - `jupyter`, for the JupyterLab launcher
   - `picamera2` and a camera module, for the live stream and snapshots
-  - SPI enabled and `gcc` installed, for game-controller driving. Without `gcc` it falls back to a
+  - SPI enabled and `gcc` installed, for driving with a game controller. Without `gcc` it falls back to a
     slower pure-Python driver.
   - NetworkManager (`nmcli`) and passwordless `sudo` for the SSH user, for the Wi-Fi tab. A fallback
     hotspot is strongly recommended too; see [Managing the robot's Wi-Fi](#managing-the-robots-wi-fi).

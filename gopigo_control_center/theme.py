@@ -73,8 +73,8 @@ def init_style(root):
         "TNotebook.Tab",
         background=NEUTRAL,
         foreground=MUTED,
-        padding=(16, 9),
-        font=FONT_BOLD,
+        padding=(10, 9),
+        font=(FONT_FAMILY, 9, "bold"),
         borderwidth=0,
     )
     style.map(

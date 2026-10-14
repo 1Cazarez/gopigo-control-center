@@ -322,11 +322,13 @@ class JupyterCameraTabMixin:
 
     def _on_camera_ready(self, url):
         self.camera_status_var.set("Camera stream: running")
+        self._dashboard_camera_ready(url)
         self.camera_url_var.set(url)
         self.camera_open_btn.config(state="normal")
         self._set_status("Camera stream is up.")
 
     def _on_camera_stopped(self):
+        self._dashboard_camera_stopped()
         self.camera_channel = None
         self.camera_url = None
         self.camera_status_var.set("Camera stream: not running")
