@@ -1,5 +1,5 @@
-"""Settings that persist between runs (controller button bindings, driving speed), kept in a small JSON
-file in the user's home folder.
+"""Settings that persist between runs (controller button bindings, driving speed, light states), kept in a
+small JSON file in the user's home folder.
 """
 
 import json
@@ -25,6 +25,11 @@ DEFAULTS = {
     },
     "max_speed": 250,
     "deadzone": 0.15,
+    # Which board lights are on and their colors, as last set from the app (the board can't report them),
+    # and the robot's boot ID when they were set: after a reboot they're back to the robot's defaults.
+    "lights": {},
+    "light_colors": {},
+    "robot_boot_id": "",
 }
 
 

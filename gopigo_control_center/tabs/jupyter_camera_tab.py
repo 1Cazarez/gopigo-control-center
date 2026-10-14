@@ -26,6 +26,35 @@ from theme import divider, style_button
 # connection would leave the Start button disabled forever.
 OPEN_TIMEOUT = 15
 
+# Stops any camera stream still running on the robot. The [c] keeps pkill from matching this command's
+# own shell, whose command line contains the pattern too.
+KILL_CAMERA_STREAMS = f"pkill -f '[{os.path.basename(REMOTE_CAMERA_STREAM_PATH)[0]}]{os.path.basename(REMOTE_CAMERA_STREAM_PATH)[1:]}'"
+
+
+# Lists other programs of this user that have the camera open (libcamera holds /dev/media*), as "pid command".
+FIND_CAMERA_USERS = (
+    "for p in /proc/[0-9]*; do "
+    "ls -l $p/fd 2>/dev/null | grep -q '/dev/media' && echo \"${p#/proc/} $(tr '\\0' ' ' < $p/cmdline)\"; "
+    "done; true"
+)
+
+
+def camera_failure_reason(output):
+    """A plain-language reason the camera failed, from everything the robot printed."""
+    lowered = output.lower()
+    if "busy" in lowered or "failed to acquire camera" in lowered or "in use" in lowered:
+        return ("The camera is busy: another program on the robot is using it -- perhaps Take Photo, "
+                "JupyterLab or a script of yours. Stop that program and try again.")
+    if "list index out of range" in lowered or "no cameras" in lowered:
+        return ("No camera was found. Check that the ribbon cable is pushed in firmly at both ends, with "
+                "the contacts facing the right way, then reboot the robot.")
+    if "no module named" in lowered and "picamera2" in lowered:
+        return "picamera2 isn't installed where the robot's ~/.venv/gopigo3 can see it."
+    if "address already in use" in lowered:
+        return "Port 8000 is already in use on the robot, so the stream can't start there."
+    lines = output.strip().splitlines()
+    return lines[-1] if lines else "No output -- is picamera2 installed, and is the camera connected?"
+
 
 class JupyterCameraTabMixin:
     def _build_jupyter_camera_tab(self):
@@ -81,6 +110,7 @@ class JupyterCameraTabMixin:
             "neutral",
         )
         self.camera_open_btn.pack(side="left", padx=8)
+        style_button(tk.Button(camera_row, text="Reset Camera", command=self.reset_camera), "warning").pack(side="left")
 
         self.camera_status_var = tk.StringVar(value="Camera stream: not running")
         ttk.Label(outer, textvariable=self.camera_status_var, style="CardMuted.TLabel").pack(
@@ -255,6 +285,9 @@ class JupyterCameraTabMixin:
 
         def worker():
             try:
+                # A stream from an earlier session (the connection dropped, or the app was closed) keeps
+                # running on the robot and holding the camera, so stop it first.
+                self._stop_stray_camera_streams()
                 sftp = self.ssh_client.open_sftp()
                 try:
                     sftp.mkdir(REMOTE_KERNEL_DIR)
@@ -303,7 +336,7 @@ class JupyterCameraTabMixin:
                         self.root.after(0, self._on_camera_stopped)
                     else:  # it ended without us asking: tell the user why
                         exit_code = channel.recv_exit_status()
-                        output = "\n".join(buffer.replace("CAMERA_STREAM_READY", "").strip().splitlines()[-8:])
+                        output = buffer.replace("CAMERA_STREAM_READY", "")
                         self.root.after(0, lambda: self._on_camera_died(exit_code, output, found_ready))
                     break
                 else:
@@ -316,9 +349,13 @@ class JupyterCameraTabMixin:
         self._on_camera_stopped()
         what = "The camera stream stopped on its own." if was_running else "The camera stream didn't start."
         code = f" (exit code {exit_code})" if exit_code >= 0 else ""
-        detail = output or "No output -- is picamera2 installed in the robot's ~/.venv/gopigo3, and is the camera connected?"
+        # The reason comes first: a long traceback would push it off the bottom of the dialog.
+        message = f"{what}{code}\n\n{camera_failure_reason(output)}"
+        last_line = output.strip().splitlines()[-1:] if output.strip() else []
+        if last_line and last_line[0] not in message:
+            message += f"\n\nThe robot's last message:\n{last_line[0]}"
         self.camera_status_var.set("Camera stream: stopped unexpectedly" if was_running else "Camera stream: failed to start")
-        messagebox.showerror("Camera stream", f"{what}{code}\n\nLast output from the robot:\n{detail}")
+        messagebox.showerror("Camera stream", message)
 
     def _on_camera_ready(self, url):
         self.camera_status_var.set("Camera stream: running")
@@ -346,13 +383,56 @@ class JupyterCameraTabMixin:
             except Exception:
                 pass
             try:
-                self.ssh_client.exec_command(f"pkill -f {os.path.basename(REMOTE_CAMERA_STREAM_PATH)}")
+                self._stop_stray_camera_streams()
             except Exception:
                 pass
             self.root.after(0, self._on_camera_stopped)
             self.root.after(0, lambda: self._set_status("Camera stream stopped."))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def reset_camera(self):
+        """Free the camera: stop the app's camera stream and any camera program the app left running on the
+        robot (a stream from an earlier session, or a stuck Take Photo), then say if anything else has it."""
+        if not self._require_connection():
+            return
+        self.camera_stopping = True
+        self.camera_status_var.set("Camera stream: resetting...")
+
+        def worker():
+            try:
+                if self.camera_channel is not None:
+                    self.camera_channel.close()
+                self._stop_stray_camera_streams()
+                _, stdout, _ = self.ssh_client.exec_command(
+                    f"pkill -f '[l]ast_photo.jpg'; {FIND_CAMERA_USERS}", timeout=OPEN_TIMEOUT
+                )
+                users = stdout.read().decode(errors="replace").strip()
+                error = None
+            except Exception as e:
+                users, error = "", str(e)
+            self.root.after(0, lambda: self._on_camera_reset(users, error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_camera_reset(self, users, error):
+        self._on_camera_stopped()
+        if error:
+            messagebox.showerror("Reset Camera", f"Couldn't reset the camera: {error}")
+        elif users:
+            messagebox.showwarning(
+                "Reset Camera",
+                "The app's camera programs are stopped, but these programs on the robot still have the camera "
+                f"open, so it may stay busy until they finish or you stop them:\n\n{users}",
+            )
+        else:
+            self._set_status("Camera reset: nothing on the robot is using it now.")
+            messagebox.showinfo("Reset Camera", "The camera is free: nothing on the robot is using it now.")
+
+    def _stop_stray_camera_streams(self):
+        """Stop any camera stream running on the robot, waiting until the camera is free again."""
+        _, stdout, _ = self.ssh_client.exec_command(f"{KILL_CAMERA_STREAMS} && sleep 1", timeout=OPEN_TIMEOUT)
+        stdout.channel.recv_exit_status()
 
     def open_camera_in_browser(self):
         if self.camera_url:
@@ -375,6 +455,8 @@ class JupyterCameraTabMixin:
             )
             command = f"{VENV_ACTIVATE} && python3 -c \"{snippet}\""
             try:
+                if self.camera_channel is None:
+                    self._stop_stray_camera_streams()  # one left from an earlier session would hold the camera
                 sftp = self.ssh_client.open_sftp()
                 try:
                     sftp.mkdir(REMOTE_KERNEL_DIR)
@@ -386,7 +468,7 @@ class JupyterCameraTabMixin:
                 exit_status = stdout.channel.recv_exit_status()
                 if exit_status != 0:
                     err = stderr.read().decode(errors="replace").strip()
-                    reason = err.splitlines()[-1] if err else "camera capture failed"  # the traceback's last line
+                    reason = camera_failure_reason(err) if err else "camera capture failed"
                     if self.camera_channel is not None:
                         reason += " -- the live stream is using the camera, so stop it first"
                     raise RuntimeError(reason)

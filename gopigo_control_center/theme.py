@@ -24,7 +24,7 @@ SUCCESS = "#2ea36f"       # Start / Connect / go actions
 SUCCESS_DARK = "#25865a"
 DANGER = "#e0473b"        # Stop / Disconnect / emergency stop
 DANGER_DARK = "#b83a30"
-WARNING = "#e0a63b"       # Restart kernel, caution actions
+WARNING = "#e0a63b"       # caution actions
 WARNING_DARK = "#b8862f"
 NEUTRAL = "#e2e7ee"
 NEUTRAL_DARK = "#c9d0da"
@@ -73,8 +73,8 @@ def init_style(root):
         "TNotebook.Tab",
         background=NEUTRAL,
         foreground=MUTED,
-        padding=(10, 9),
-        font=(FONT_FAMILY, 9, "bold"),
+        padding=(16, 9),
+        font=FONT_BOLD,
         borderwidth=0,
     )
     style.map(

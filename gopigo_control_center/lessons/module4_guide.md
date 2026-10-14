@@ -1,8 +1,10 @@
-# CSC 4120/6120 – Introduction to Robotics: Module 3 Study Guide
+# Module 4 – Study Guide
+
+CSC 4120/6120 – Introduction to Robotics
 
 ## Introduction
 
-This manual provides a comprehensive guide for Module 3 of the GoPiGo3 Robotics curriculum. It consolidates exercises, assignments, and detailed step-by-step procedures into a single reference document.
+This manual provides a comprehensive guide for Module 4 of the GoPiGo3 Robotics curriculum. It consolidates exercises, assignments, and detailed step-by-step procedures into a single reference document.
 
 By following this guide, students will:
 
@@ -16,7 +18,7 @@ Assignment solutions (code) are not included. Instead, requirements, execution s
 
 ## Prerequisites & Setup
 
-Before starting Module 3, ensure you have the following:
+Before starting Module 4, ensure you have the following:
 
 1. GoPiGo3 robot assembled with tight wheels and working encoders.
 2. Raspberry Pi with DexterOS or Raspbian for Robots installed.

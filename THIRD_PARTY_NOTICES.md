@@ -3,13 +3,6 @@
 This repository's own code is under the [MIT License](LICENSE). It also includes or is
 derived from the following third-party work.
 
-## Blockly
-
-The Block Builder tab bundles Blockly 13.3.0 (Google), licensed under the Apache License 2.0. The
-full license text is in [`gopigo_control_center/web/blockly/LICENSE`](gopigo_control_center/web/blockly/LICENSE).
-
-- Source: <https://github.com/google/blockly>
-
 ## picamera2 MJPEG streaming example
 
 The camera streaming server in

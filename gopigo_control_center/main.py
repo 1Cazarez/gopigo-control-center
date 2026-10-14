@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """GoPiGo Control Center -- entry point.
 
-A desktop GUI for writing Python scripts (or snapping them together from
-blocks), driving the robot manually (via buttons or a game controller),
-watching live sensor readings, browsing files on the robot, launching
-JupyterLab, watching a live camera stream, and streaming console output in
-real time -- all over SSH.
+A desktop GUI for driving a GoPiGo3 robot (with on-screen buttons or a game
+controller), watching its camera and sensors, setting its lights, launching
+JupyterLab, managing its Wi-Fi and reading the course modules -- all over SSH.
 
 Run:
     python3 main.py

@@ -1,10 +1,9 @@
 # GoPiGo Control Center
 
-A desktop GUI for controlling the GoPiGo3 robot over SSH: a code editor with
-one-click send-and-run, Jupyter-style notebook cells, drag-and-drop block
-coding, a dashboard with the live camera, sensors and a game controller, manual driving, control of the board's LEDs, live sensor readouts (including
-a battery meter), a remote file browser, one-click JupyterLab launch, and a
-live camera stream + snapshot tool, plus an Education tab for reading course lessons.
+A desktop GUI for controlling the GoPiGo3 robot over SSH: a dashboard with the
+live camera, sensors and a game controller; manual driving with sensor readouts
+and control of the board's lights; one-click JupyterLab launch with a live camera
+stream and snapshots; the robot's Wi-Fi; and the course modules.
 
 ## Setup
 
@@ -44,44 +43,27 @@ gopigo_control_center/
 ├── theme.py               colors, fonts, ttk styling
 ├── widgets.py              small reusable widgets (BatteryMeter, Compass, ProximityBar, ControllerView)
 ├── gamepad.py               reads game controllers through pygame/SDL
-├── user_settings.py          saved settings (controller buttons, speed)
-├── constants.py             shared constants and helpers (venv path, default paths, starter template)
+├── user_settings.py          saved settings (controller buttons, speed, light states)
+├── constants.py             shared constants and helpers (venv path, login shell)
 ├── dependencies.py           optional imports (paramiko, pygame)
 ├── remote_scripts.py          scripts deployed onto the robot over SFTP
-├── block_server.py             local web server behind the Block Builder tab
 ├── wifi.py                       nmcli commands + parsing for the Wi-Fi tab (no Tk, easy to test)
 ├── requirements.txt
-├── web/                          Block Builder page + vendored Blockly (with its LICENSE)
-├── lessons/                       course lessons shown in the Education tab (Markdown)
+├── lessons/                       course modules shown in the Modules tab (Markdown)
 └── tabs/
     ├── dashboard_tab.py          Dashboard (camera, sensors, controller driving and bindings)
-    ├── code_tab.py           Code Editor & Run
-    ├── notebook_tab.py         Notebook Cells
-    ├── blocks_tab.py            Block Builder
-    ├── drive_tab.py             Manual Drive
-    ├── lights_tab.py              Lights (board LEDs)
-    ├── sensor_tab.py               Live Sensors
-    ├── files_tab.py                 Remote Files
-    ├── jupyter_camera_tab.py         Jupyter & Camera
-    ├── wifi_tab.py                     Wi-Fi
-    └── education_tab.py                 Education
+    ├── manual_tab.py             Manual Control: lays out the three sections below
+    ├── drive_tab.py               on-screen driving buttons
+    ├── sensors_panel.py           sensor panels (also on the Dashboard) and the telemetry stream behind them
+    ├── lights_tab.py              board lights: state, toggles, colors, turn signals
+    ├── jupyter_camera_tab.py     Jupyter & Camera
+    ├── wifi_tab.py               Wi-Fi
+    └── education_tab.py          Modules
 ```
 
 Each tab is a small mixin class; `GoPiGoApp` in `app.py` combines all of
 them, so every tab's methods end up on `self` as if they were written in
 one file, but each lives in its own module.
-
-## The Block Builder tab
-
-Tkinter can't host a web view, so the block editor ([Blockly](https://github.com/google/blockly))
-opens in your web browser. The Control Center serves it from a small web server inside the app
-(`block_server.py`), and the page's Send / Send & Run / Stop buttons call back into the app, which
-relays them to the robot over the connection you already made -- there's no second login. The
-generated Python is written to `block_builder_output.py` in the robot user's home folder.
-
-Since that server can run code on the robot, it only listens on `127.0.0.1` (this computer) on a
-random port, and it rejects any request that doesn't carry the random per-session key from the link
-the app opens -- including requests from other websites open in your browser.
 
 ## The Wi-Fi tab
 
@@ -92,9 +74,10 @@ profile in access-point mode is treated as the robot's fallback hotspot and is p
 deletion. See the [top-level README](../README.md#managing-the-robots-wi-fi) for how switching
 networks behaves and what the robot needs.
 
-## The Education tab
+## The Modules tab
 
-Each `.md` file in `lessons/` is one lesson; its first `# ` line is the name shown in the lesson picker,
+Each `.md` file in `lessons/` is one document; its first `# ` line is the name shown in the picker
+(files are listed in natural order, so `module10` comes after `module9`),
 and each `## ` heading becomes an entry in the section list. The tab understands a small part of
 Markdown: `#`/`##`/`###` headings, `- ` bullets (indent four spaces to nest), `1. ` numbered steps,
 fenced code blocks and `` `inline code` ``. Web addresses become clickable links.

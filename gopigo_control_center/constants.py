@@ -2,24 +2,7 @@
 
 import shlex
 
-DEFAULT_TEMPLATE = '''import easygopigo3 as easy
-import time
-
-gpg = easy.EasyGoPiGo3()
-
-gpg.drive_cm(10)
-gpg.turn_degrees(90)
-gpg.stop()
-
-print("Done!")
-'''
-
 VENV_ACTIVATE = "source ~/.venv/gopigo3/bin/activate"
-
-# Defaults for the path fields. Both are relative to the robot user's home
-# folder (where SSH and SFTP sessions start), so they work for any username.
-DEFAULT_REMOTE_DIR = "."
-DEFAULT_REMOTE_SCRIPT = "my_robot.py"
 
 
 def login_shell(command):

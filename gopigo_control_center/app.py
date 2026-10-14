@@ -8,19 +8,16 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
-from constants import DEFAULT_TEMPLATE
+import user_settings
 from dependencies import paramiko, pygame
 from tabs import (
-    BlocksTabMixin,
-    CodeTabMixin,
     DashboardTabMixin,
     DriveTabMixin,
     EducationTabMixin,
-    FilesTabMixin,
     JupyterCameraTabMixin,
     LightsTabMixin,
-    NotebookTabMixin,
-    SensorTabMixin,
+    ManualTabMixin,
+    SensorsMixin,
     WifiTabMixin,
 )
 from theme import BAR_BG, FONT_BASE, init_style, style_button
@@ -53,17 +50,14 @@ def initial_geometry(root):
 
 
 class GoPiGoApp(
-    CodeTabMixin,
-    NotebookTabMixin,
-    BlocksTabMixin,
+    DashboardTabMixin,
+    ManualTabMixin,
     DriveTabMixin,
+    SensorsMixin,
     LightsTabMixin,
-    SensorTabMixin,
-    FilesTabMixin,
     JupyterCameraTabMixin,
     WifiTabMixin,
     EducationTabMixin,
-    DashboardTabMixin,
 ):
     def __init__(self, root):
         self.root = root
@@ -73,18 +67,8 @@ class GoPiGoApp(
         self.ui_scale = text_scale(root)
 
         self.ssh_client = None
-        self.current_filepath = None
-        self.sensor_polling = False
-        self.run_channel = None  # active channel for a running whole-script
-
-        # Notebook-cell kernel state
-        self.kernel_channel = None
-        self.kernel_lock = threading.Lock()
-        self.cells = []
-        self.current_cell = None
-
-        # Block Builder: local web server, started the first time the tab's button is clicked
-        self.block_server = None
+        self.ssh_password = ""  # the password used to connect; the Wi-Fi tab gives it to sudo
+        self.settings = user_settings.load()  # controller buttons, speed, light states
 
         # Controller-drive state (Dashboard tab)
         self.motor_channel = None
@@ -110,8 +94,6 @@ class GoPiGoApp(
         self._build_connection_bar()
         self._build_tabs()
         self._build_status_bar()
-
-        self.editor.insert("1.0", DEFAULT_TEMPLATE)
 
     # ---------------- Connection bar (shared across all tabs) ----------------
     def _build_connection_bar(self):
@@ -188,6 +170,7 @@ class GoPiGoApp(
                 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 client.connect(host, username=user, password=password, timeout=10)
                 client.get_transport().set_keepalive(KEEPALIVE_SECONDS)  # also keeps Wi-Fi routers from dropping an idle link
+                self.ssh_password = password
                 self.ssh_client = client
                 self.root.after(0, self._on_connected)
             except Exception as e:
@@ -202,7 +185,7 @@ class GoPiGoApp(
         self.connect_btn.config(text="Disconnect")
         style_button(self.connect_btn, "danger")
         self._set_status("Connected to robot.")
-        self.refresh_file_list()
+        self._check_robot_boot()
         self._start_connection_watch()
 
     def _on_connect_failed(self, err):
@@ -255,7 +238,6 @@ class GoPiGoApp(
     def _disconnect(self):
         self.jupyter_stopping = True  # closing these channels below is on purpose, not a failure to report
         self.camera_stopping = True
-        self.sensor_polling = False
         self.controller_active = False
         try:
             if self.motor_channel:
@@ -263,12 +245,6 @@ class GoPiGoApp(
         except Exception:
             pass
         self.motor_channel = None
-        try:
-            if self.kernel_channel:
-                self.kernel_channel.close()
-        except Exception:
-            pass
-        self.kernel_channel = None
         try:
             if self.jupyter_channel:
                 self.jupyter_channel.close()
@@ -289,17 +265,15 @@ class GoPiGoApp(
         except Exception:
             pass
         self.ssh_client = None
+        self.ssh_password = ""
         self.conn_status_var.set("Not connected")
         self.conn_status_label.config(fg="#e0473b")
         self.connect_btn.config(text="Connect")
         style_button(self.connect_btn, "success")
         # Put every start/stop button back to "Start", so nothing reads "Stop" for a service that's gone.
-        self.kernel_status_var.set("Kernel: not running")
         self._on_jupyter_stopped()
         self._on_camera_stopped()
-        self.poll_btn.config(text="Start Live Sensors", bg="#2ea36f")
         self._dashboard_on_disconnect()
-        self.battery_meter.set_voltage(None)
         self._set_status("Disconnected.")
 
     def _require_connection(self):
@@ -314,36 +288,18 @@ class GoPiGoApp(
         self.notebook.pack(fill="both", expand=True, padx=10, pady=8)
 
         self.dashboard_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.code_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.notebook_cells_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.blocks_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.drive_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.lights_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.sensor_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.files_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.manual_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.jupyter_camera_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.wifi_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.education_tab = ttk.Frame(self.notebook, style="Card.TFrame")
 
         self.notebook.add(self.dashboard_tab, text="Dashboard")
-        self.notebook.add(self.code_tab, text="Code Editor & Run")
-        self.notebook.add(self.notebook_cells_tab, text="Notebook Cells")
-        self.notebook.add(self.blocks_tab, text="Block Builder")
-        self.notebook.add(self.drive_tab, text="Manual Drive")
-        self.notebook.add(self.lights_tab, text="Lights")
-        self.notebook.add(self.sensor_tab, text="Live Sensors")
-        self.notebook.add(self.files_tab, text="Remote Files")
+        self.notebook.add(self.manual_tab, text="Manual Control")
         self.notebook.add(self.jupyter_camera_tab, text="Jupyter & Camera")
         self.notebook.add(self.wifi_tab, text="Wi-Fi")
-        self.notebook.add(self.education_tab, text="Education")
+        self.notebook.add(self.education_tab, text="Modules")
 
-        self._build_code_tab()
-        self._build_notebook_cells_tab()
-        self._build_blocks_tab()
-        self._build_drive_tab()
-        self._build_lights_tab()
-        self._build_sensor_tab()
-        self._build_files_tab()
+        self._build_manual_tab()
         self._build_jupyter_camera_tab()
         self._build_wifi_tab()
         self._build_education_tab()

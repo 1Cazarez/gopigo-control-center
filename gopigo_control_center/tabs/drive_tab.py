@@ -1,4 +1,4 @@
-"""Manual Drive tab -- simple directional buttons and a speed slider."""
+"""Manual driving -- directional buttons and a speed slider, on the Manual Control tab."""
 
 import threading
 import tkinter as tk
@@ -9,18 +9,13 @@ from theme import style_button
 
 
 class DriveTabMixin:
-    def _build_drive_tab(self):
-        outer = ttk.Frame(self.drive_tab, style="Card.TFrame", padding=20)
-        outer.pack(fill="both", expand=True)
+    def _build_drive_section(self, parent):
+        """The driving controls, in a new frame in parent (not yet placed); returns the frame."""
+        wrap = ttk.Frame(parent, style="Card.TFrame")
 
-        wrap = ttk.Frame(outer, style="Card.TFrame")
-        wrap.pack(expand=True)
+        ttk.Label(wrap, text="Drive", style="Heading.TLabel").grid(row=0, column=0, columnspan=3, pady=(0, 10), sticky="w")
 
-        ttk.Label(wrap, text="Manual Drive Controls", style="Heading.TLabel").grid(
-            row=0, column=0, columnspan=3, pady=(0, 16)
-        )
-
-        btn_opts = dict(width=10, height=3)
+        btn_opts = dict(width=9, height=2)
 
         style_button(
             tk.Button(wrap, text="Forward", command=lambda: self._drive_cmd("gpg.forward()", "-"), **btn_opts),
@@ -41,7 +36,7 @@ class DriveTabMixin:
         ).grid(row=3, column=1, padx=6, pady=6)
 
         speed_frame = ttk.Frame(wrap, style="Card.TFrame")
-        speed_frame.grid(row=4, column=0, columnspan=3, pady=20)
+        speed_frame.grid(row=4, column=0, columnspan=3, pady=12)
         ttk.Label(speed_frame, text="Speed (deg/sec):", style="Card.TLabel").pack(side="left")
         self.speed_var = tk.IntVar(value=200)
         self.drive_speed = self.speed_var.get()  # the speed last set with Set Speed
@@ -57,6 +52,7 @@ class DriveTabMixin:
         ttk.Label(wrap, textvariable=self.drive_status_var, style="CardMuted.TLabel").grid(
             row=5, column=0, columnspan=3
         )
+        return wrap
 
     def _drive_cmd(self, gpg_call, signal=None):
         """signal: the blinker to show with this move -- "L", "R" or "-" (none) -- or None to leave them alone."""
@@ -66,7 +62,7 @@ class DriveTabMixin:
         snippet = f"import easygopigo3 as easy; gpg = easy.EasyGoPiGo3(); gpg.set_speed({self.drive_speed}); {gpg_call}"
         if signal is not None and self.turn_signals_var.get():
             left, right = (255 if signal == "L" else 0), (255 if signal == "R" else 0)
-            self.light_on.update(left_blinker=bool(left), right_blinker=bool(right))
+            self._record_lights(left_blinker=bool(left), right_blinker=bool(right))
             snippet += f"; gpg.set_led(gpg.LED_BLINKER_LEFT, {left}); gpg.set_led(gpg.LED_BLINKER_RIGHT, {right})"
         command = f"{VENV_ACTIVATE} && python3 -c \"{snippet}\""
 

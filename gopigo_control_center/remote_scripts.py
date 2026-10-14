@@ -5,45 +5,9 @@ to them over their SSH channel.
 
 import re
 
-# ---- Notebook-cell "kernel" support ----
-# A tiny persistent process runs on the Pi and execs each cell's code into a
-# shared namespace, so variables/imports persist between cells like a real
-# notebook kernel. Cells are separated by CELL_END_MARKER; the kernel replies
-# with CELL_DONE_MARKER once a cell has finished running.
-CELL_END_MARKER = "###CELL_END###"
-CELL_DONE_MARKER = "###OUTPUT_END###"
-# Relative paths: SSH/SFTP sessions start in the robot user's home folder, so
-# this resolves correctly whatever username you log in with.
+# Helper scripts live in this hidden folder. The path is relative: SSH/SFTP
+# sessions start in the robot user's home folder, so it works for any username.
 REMOTE_KERNEL_DIR = ".gopigo_ide"
-REMOTE_KERNEL_PATH = f"{REMOTE_KERNEL_DIR}/cell_kernel.py"
-
-KERNEL_SCRIPT = r'''import sys, traceback
-
-END_MARKER = "###CELL_END###"
-DONE_MARKER = "###OUTPUT_END###"
-
-namespace = {}
-buffer = []
-
-for line in sys.stdin:
-    line = line.rstrip("\n")
-    if line == END_MARKER:
-        code = "\n".join(buffer)
-        buffer = []
-        try:
-            exec(code, namespace)
-        except Exception:
-            traceback.print_exc()
-        print(DONE_MARKER)
-        sys.stdout.flush()
-    else:
-        buffer.append(line)
-'''
-
-# ---- Block Builder support ----
-# The generated Python from the Block Builder tab is written here (in the
-# robot user's home folder, so you can open or edit it later) and run.
-REMOTE_BLOCKS_SCRIPT_PATH = "block_builder_output.py"
 
 # ---- Live controller-drive support ----
 # A tiny persistent process on the Pi holds the motor connection open and

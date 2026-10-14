@@ -1,4 +1,6 @@
-# CSC 4120/6120 – Introduction to Robotics: Module 3 Lab Handout
+# Module 4 – Lab Handout
+
+CSC 4120/6120 – Introduction to Robotics
 
 ## Overview
 

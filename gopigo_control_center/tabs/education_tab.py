@@ -1,7 +1,7 @@
-"""Education tab -- read course lessons (lab manuals, exercises, assignments) inside the app.
+"""Modules tab -- read course modules (lab handouts, exercises, assignments) inside the app.
 
-Lessons are Markdown files in the lessons/ folder; drop in another .md file and it shows up in the
-lesson picker. Only a small subset of Markdown is understood: # / ## / ### headings, "- " bullets
+Each module document is a Markdown file in the lessons/ folder; drop in another .md file and it shows up
+in the picker, in module order (module9 before module10). Only a small subset of Markdown is understood: # / ## / ### headings, "- " bullets
 (indent four spaces to nest), "1. " numbered steps, ``` fenced code blocks and `inline code`.
 Web addresses become clickable links.
 """
@@ -27,7 +27,8 @@ def load_lessons():
     """(title, path) for every lesson file, sorted by file name. The title is the file's first '# ' line."""
     lessons = []
     if os.path.isdir(LESSONS_DIR):
-        for name in sorted(os.listdir(LESSONS_DIR)):
+        # Natural order, so module10 comes after module9 rather than after module1.
+        for name in sorted(os.listdir(LESSONS_DIR), key=lambda n: [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", n)]):
             if not name.endswith(".md"):
                 continue
             path = os.path.join(LESSONS_DIR, name)
@@ -51,7 +52,7 @@ class EducationTabMixin:
 
         top = ttk.Frame(outer, style="Card.TFrame")
         top.pack(fill="x", pady=(0, 8))
-        ttk.Label(top, text="Lesson:", style="Card.TLabel").pack(side="left", padx=(0, 6))
+        ttk.Label(top, text="Module:", style="Card.TLabel").pack(side="left", padx=(0, 6))
         self.lesson_var = tk.StringVar()
         picker = ttk.Combobox(
             top, textvariable=self.lesson_var, state="readonly", width=60,
@@ -90,7 +91,7 @@ class EducationTabMixin:
             picker.current(0)
             self._show_lesson(0)
         else:
-            self._render_lesson(f"# No lessons found\n\nAdd Markdown (.md) files to:\n\n```\n{LESSONS_DIR}\n```\n")
+            self._render_lesson(f"# No modules found\n\nAdd Markdown (.md) files to:\n\n```\n{LESSONS_DIR}\n```\n")
 
     def _configure_lesson_tags(self):
         t = self.lesson_text

@@ -158,7 +158,7 @@ class WifiTabMixin:
     # ---------------- actions ----------------
     def wifi_refresh(self):
         def work():
-            manager = WifiManager(self.ssh_client)
+            manager = WifiManager(self.ssh_client, self.ssh_password)
             saved = manager.saved_networks()
             return saved, manager.status(saved)
 
@@ -194,7 +194,7 @@ class WifiTabMixin:
         rescan = not self.wifi_hotspot_mode  # rescanning can interrupt a hotspot the robot is hosting
 
         def work():
-            return WifiManager(self.ssh_client).scan(rescan=rescan)
+            return WifiManager(self.ssh_client, self.ssh_password).scan(rescan=rescan)
 
         self._wifi_task("Scanning for networks...", work, self._wifi_show_scan)
 
@@ -254,7 +254,7 @@ class WifiTabMixin:
             return
 
         def work():
-            WifiManager(self.ssh_client).connect(profile)
+            WifiManager(self.ssh_client, self.ssh_password).connect(profile)
 
         self._wifi_task(
             f"Switching to '{profile['name']}'...", work, lambda _: self._wifi_after_connect(profile),
@@ -279,7 +279,7 @@ class WifiTabMixin:
             return
 
         def work():
-            WifiManager(self.ssh_client).forget(profile)
+            WifiManager(self.ssh_client, self.ssh_password).forget(profile)
 
         def link_lost(_):
             if profile["active"]:
@@ -303,7 +303,7 @@ class WifiTabMixin:
             return
 
         def work():
-            manager = WifiManager(self.ssh_client)
+            manager = WifiManager(self.ssh_client, self.ssh_password)
             profile = manager.save_network(ssid, password, kind, hidden=hidden)
             if connect_now:
                 try:

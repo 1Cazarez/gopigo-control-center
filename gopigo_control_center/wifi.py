@@ -4,7 +4,9 @@ Plain Python, no Tk: WifiManager takes the paramiko SSHClient and runs
 `sudo nmcli ...` on the robot. It's kept apart from the tab (tabs/wifi_tab.py)
 so the parsing and command building can be tested without a robot or a window.
 
-The robot needs NetworkManager (nmcli) and passwordless sudo for the SSH user.
+The robot needs NetworkManager (nmcli), and the SSH user must be allowed to use sudo.
+sudo is given the password used to log in, through the command's stdin (so it
+never appears in a command line); with passwordless sudo it simply isn't needed.
 
 A note on secrets: a Wi-Fi password travels as an nmcli argument, so it's
 briefly visible in the robot's process list. That's acceptable on a
@@ -141,9 +143,10 @@ def parse_status(text):
 def nmcli_cmd(*args):
     """A remote command line for `sudo nmcli ...`, with every argument shell-quoted.
 
+    `sudo -S -p ''` reads a password from stdin, without printing a prompt, if it needs one.
     `env LC_ALL=C` keeps nmcli's output in English whatever the robot's locale.
     """
-    return " ".join(shlex.quote(part) for part in ("sudo", "-n", "env", "LC_ALL=C", "nmcli", *args))
+    return " ".join(shlex.quote(part) for part in ("sudo", "-S", "-p", "", "env", "LC_ALL=C", "nmcli", *args))
 
 
 def _security_args(kind, password):
@@ -175,9 +178,12 @@ def validate_network(ssid, password, kind):
 def _friendly_error(text):
     message = text.strip()
     lowered = message.lower()
-    if "a password is required" in lowered or "a terminal is required" in lowered:
-        return ("The robot needs passwordless sudo for Wi-Fi changes, but sudo asked for a password. "
-                "Set that up on the robot, or run the nmcli command there yourself.")
+    if ("incorrect password" in lowered or "no password was provided" in lowered or "authentication failed" in lowered
+            or "a password is required" in lowered or "a terminal is required" in lowered):
+        return ("sudo on the robot didn't accept the password you connected with, so Wi-Fi can't be changed "
+                "from here. If this user's sudo password is different, run the nmcli command on the robot yourself.")
+    if "not in the sudoers file" in lowered or "not allowed to run sudo" in lowered:
+        return "This user isn't allowed to use sudo on the robot, which Wi-Fi changes need."
     if "nmcli" in lowered and ("not found" in lowered or "no such file" in lowered):
         return "NetworkManager (nmcli) isn't installed on the robot."
     return message.splitlines()[-1] if message else "The robot reported an error without details."
@@ -185,13 +191,16 @@ def _friendly_error(text):
 
 # ---------------- Talking to the robot ----------------
 class WifiManager:
-    def __init__(self, client):
+    def __init__(self, client, sudo_password=""):
         self.client = client
+        self.sudo_password = sudo_password
         self._device = None
 
     def _run(self, command, timeout=20):
         try:
-            _, stdout, stderr = self.client.exec_command(command, timeout=timeout)
+            stdin, stdout, stderr = self.client.exec_command(command, timeout=timeout)
+            stdin.write(self.sudo_password + "\n")  # read by sudo -S if it asks; nmcli ignores stdin
+            stdin.channel.shutdown_write()
             out = stdout.read().decode(errors="replace")
             err = stderr.read().decode(errors="replace")
             code = stdout.channel.recv_exit_status()
