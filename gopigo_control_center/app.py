@@ -22,7 +22,7 @@ from tabs import (
     SensorsMixin,
     WifiTabMixin,
 )
-from theme import BAR_BG, FONT_BASE, init_style, style_button
+from theme import BAR_BG, DANGER, FONT_BASE, init_style, style_button
 
 # Window size for text of normal size. Some setups (for example Tk on XWayland) render text about twice
 # as large as requested, which would clip most tabs at a fixed size, so the window grows with the text.
@@ -35,6 +35,8 @@ WATCH_INTERVAL = 5
 WATCH_PING_TIMEOUT = 10
 WATCH_MISSES = 2
 KEEPALIVE_SECONDS = 20
+
+FULLSCREEN_ON, FULLSCREEN_OFF = "□", "❐"  # the window buttons: go full screen / back to a window
 
 
 def text_scale(root):
@@ -109,7 +111,7 @@ class GoPiGoApp(
         frame.pack(fill="x")
 
         tk.Label(frame, text="GoPiGo Control Center", bg=BAR_BG, fg="#ffffff", font=("Segoe UI", 12, "bold")).grid(
-            row=0, column=0, sticky="w", padx=(0, 24)
+            row=0, column=0, sticky="w", padx=(0, 14)
         )
 
         entry_opts = dict(bg="#2b3543", fg="#ffffff", insertbackground="#ffffff", relief="flat", bd=0)
@@ -118,7 +120,7 @@ class GoPiGoApp(
             row=0, column=1, sticky="e", padx=(0, 4)
         )
         self.host_var = tk.StringVar(value=self.settings["host"])
-        tk.Entry(frame, textvariable=self.host_var, width=18, **entry_opts).grid(
+        tk.Entry(frame, textvariable=self.host_var, width=14, **entry_opts).grid(
             row=0, column=2, padx=(0, 12), ipady=3
         )
 
@@ -146,7 +148,7 @@ class GoPiGoApp(
             command=self._on_remember_toggled, state="normal" if can_remember else "disabled",
             bg=BAR_BG, fg="#9aa5b4", activebackground=BAR_BG, activeforeground="#ffffff", selectcolor="#2b3543",
             highlightthickness=0, font=("Segoe UI", 9),
-        ).grid(row=0, column=7, padx=(0, 14))
+        ).grid(row=0, column=7, padx=(0, 10))
 
         self.connect_btn = style_button(
             tk.Button(frame, text="Connect", command=self.toggle_connection), "success"
@@ -159,8 +161,47 @@ class GoPiGoApp(
         )
         self.conn_status_label.grid(row=0, column=9, padx=6)
 
+        # Window buttons at the far right: full screen (GNOME's title bar has no maximize button by default)
+        # and quit, which matters in full screen, where the title bar and its close button are hidden.
+        frame.columnconfigure(10, weight=1)
+        window_opts = dict(bg=BAR_BG, fg="#c9d0da", relief="flat", bd=0, padx=8, pady=0, cursor="hand2",
+                           font=("DejaVu Sans", 13), highlightthickness=0, activeforeground="#ffffff")
+        self.fullscreen_btn = tk.Button(frame, text=FULLSCREEN_ON, command=self.toggle_fullscreen,
+                                        activebackground="#3a4657", **window_opts)
+        self.fullscreen_btn.grid(row=0, column=11, sticky="e")
+        tk.Button(frame, text="✕", command=self.quit_app, activebackground=DANGER, **window_opts).grid(
+            row=0, column=12, sticky="e", padx=(2, 0)
+        )
+        self.root.bind("<F11>", lambda e: self.toggle_fullscreen())
+        self.root.bind("<Escape>", lambda e: self.set_fullscreen(False) if self.is_fullscreen() else None)
+        self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
+        if self.settings["fullscreen"]:
+            self.root.after(200, lambda: self.set_fullscreen(True))  # once the window is on screen
+
+
         if self.remember_var.get():
             self._fill_remembered_password()
+
+    # ---------------- Full screen ----------------
+    def is_fullscreen(self):
+        return bool(self.root.attributes("-fullscreen"))
+
+    def set_fullscreen(self, on):
+        """Fill the whole screen, or go back to a normal window. Remembered for next time."""
+        self.root.attributes("-fullscreen", on)
+        self.fullscreen_btn.config(text=FULLSCREEN_OFF if on else FULLSCREEN_ON)
+        if self.settings["fullscreen"] != on:
+            self.settings["fullscreen"] = on
+            user_settings.save(self.settings)
+
+    def toggle_fullscreen(self):
+        self.set_fullscreen(not self.is_fullscreen())
+
+    def quit_app(self):
+        """Close the app, disconnecting first so everything on the robot stops (the motors included)."""
+        if self.ssh_client is not None:
+            self._disconnect()
+        self.root.destroy()
 
     # ---------------- Remembering the password ----------------
     def _fill_remembered_password(self):

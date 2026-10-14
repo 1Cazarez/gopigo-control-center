@@ -10,6 +10,7 @@ PATH = os.path.join(os.path.expanduser("~"), ".gopigo_control_center.json")
 DEFAULTS = {
     "host": "robot1.local",
     "user": "pi",
+    "fullscreen": False,         # the app reopens full screen if it was closed that way
     "remember_password": False,  # the password itself is kept in the system's password store (credentials.py)
     # Button name (see gamepad.py) -> action name (see ACTIONS in tabs/dashboard_tab.py).
     "bindings": {
