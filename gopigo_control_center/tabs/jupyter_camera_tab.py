@@ -271,11 +271,17 @@ class JupyterCameraTabMixin:
             webbrowser.open(self.jupyter_url)
 
     # -- Camera streaming --
+    def _camera_used_by_autopilot(self):
+        if self.nav_channel is None:
+            return False
+        messagebox.showinfo("Camera", "The autopilot is using the camera; its live picture is on the Autopilot tab.")
+        return True
+
     def toggle_camera_stream(self):
         if self.camera_channel is not None:
             self.stop_camera_stream()
             return
-        if not self._require_connection():
+        if not self._require_connection() or self._camera_used_by_autopilot():
             return
 
         self.camera_status_var.set("Camera stream: starting...")
@@ -440,7 +446,7 @@ class JupyterCameraTabMixin:
 
     # -- Single photo snapshot --
     def take_photo(self):
-        if not self._require_connection():
+        if not self._require_connection() or self._camera_used_by_autopilot():
             return
         self.photo_status_var.set("Taking photo...")
         self.photo_btn.config(state="disabled")

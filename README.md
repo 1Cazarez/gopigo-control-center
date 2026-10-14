@@ -9,8 +9,9 @@ the robot over your network. Tabs:
   racing controls (**Start Driving** also starts the camera and sensors): **ZR** gas, **ZL** brake/reverse, **left stick** steers (while moving, like a car),
   hold **L**/**R** to spin on the spot, and the **right stick** up/down raises or lowers the top speed.
   **Safety stop** (a checkbox on the Dashboard and Manual Control, or the Home button): with the sensors
-  on, the robot won't drive forward into anything closer than 10 cm (the distance is set in Controller
-  Settings); it can still reverse or spin away.
+  on, the robot won't drive forward into anything closer than 20 cm (the distance is set in Controller
+  Settings); it can still reverse or spin away. While driving, the eyes turn yellow when the safety stop
+  is holding the robot back and red when the camera sees a face.
   Choose what the other buttons do -- blinkers, hazard lights, eye colors (X steps through them, then
   off), camera and more -- in **Controller Settings**; a legend on the Dashboard lists what every
   button does, and a drawing of the robot shows which lights should be on. Your choices are saved in
@@ -20,6 +21,17 @@ the robot over your network. Tabs:
   robot that shows which are on (click a light to switch it). The board can't report its lights, so the app remembers what it last set (in the
   same settings file), and after the robot reboots it goes back to the robot's defaults: only the Wi-Fi
   LED on. The blinkers can also act as turn signals, lighting up on the side the robot turns toward.
+- **Autopilot** -- the robot drives itself. Draw a path on a grid (click cells, or use Snake or
+  Perimeter), set the cell size and which way the robot faces, put it on the start cell and click Start.
+  It keeps track of where it is from the wheel encoders and watches the distance sensor and, if you
+  like, the camera: something in the way gets driven around, and a cell with something on it is
+  skipped. The tab shows the live picture with faces boxed, the robot's position on the grid, the
+  battery and the distance ahead. The eyes turn red when a face is in view and yellow while it gets
+  round an obstacle. **Incidents** (faces, obstacles, skipped cells, getting stuck, a low battery --
+  the threshold is adjustable for your rechargeable packs) are listed in the tab and appended to
+  `gopigo_logs/autopilot_incidents.csv`, with a photo of each face in `gopigo_logs/faces/`. The
+  autopilot stops when you click STOP or Emergency Stop, drive by hand, disconnect, or if the app
+  stops hearing from it for two seconds.
 - **Jupyter & Camera** -- launch JupyterLab on the robot, watch a live camera stream, take photos.
   **Reset Camera** frees the camera if it's stuck as busy.
 - **Wi-Fi** -- scan for networks, save new ones and switch the robot between them.
@@ -37,6 +49,8 @@ the robot over your network. Tabs:
   - Debian / Ubuntu / Raspberry Pi OS: `sudo apt install python3-tk`
   - Arch: `sudo pacman -S tk`
 - A web browser, for JupyterLab.
+- Optional: OpenCV (`opencv-python`, in `requirements.txt`), for face detection. The face model
+  ships with the app; without OpenCV everything else still works.
 
 **On the robot**
 
@@ -76,7 +90,8 @@ All remote paths are relative to the robot user's home folder, so any username w
 - Helper scripts the app deploys (motor driver, sensor reader, camera server) live in the hidden
   folder `~/.gopigo_ide/`.
 - Photos from the Camera Snapshot button are saved on your computer in a `gopigo_photos/` folder
-  inside whatever directory you launched the app from.
+  inside whatever directory you launched the app from; the Autopilot's incident log and face photos go
+  in `gopigo_logs/` there.
 
 ### If the connection to the robot drops
 
@@ -123,7 +138,8 @@ sudo nmcli connection modify Hotspot 802-11-wireless.mode ap 802-11-wireless.ban
 - The app automatically trusts any SSH host key the first time it connects (paramiko's
   `AutoAddPolicy`) and signs in with a password. That's fine on a home or classroom network you
   trust, but don't use it across an untrusted network.
-- JupyterLab (port 8888, protected by a token) and the camera stream (port 8000, **no
+- JupyterLab (port 8888, protected by a token) and the camera stream or the Autopilot's live picture
+  (port 8000, **no
   password**) listen on all of the robot's network interfaces while running. Anyone on the same
   network can reach them.
 
@@ -143,5 +159,7 @@ The code in this repository is released under the [MIT License](LICENSE).
 
 Third-party work is covered separately; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+- Face detection uses the [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
+  model (MIT License), bundled in `gopigo_control_center/models/`.
 - The camera streaming server is adapted from an example in
   [picamera2](https://github.com/raspberrypi/picamera2) (Raspberry Pi, BSD 2-Clause).

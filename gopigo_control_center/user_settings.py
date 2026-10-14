@@ -25,7 +25,8 @@ DEFAULTS = {
     "max_speed": 250,
     "deadzone": 0.15,
     "safety_stop": True,     # don't drive forward into anything closer than obstacle_stop_cm
-    "obstacle_stop_cm": 10,
+    "obstacle_stop_cm": 20,
+    "low_battery_v": 9.0,    # the Autopilot logs a low-battery incident at or below this
     # Which board lights are on and their colors, as last set from the app (the board can't report them),
     # and the robot's boot ID when they were set: after a reboot they're back to the robot's defaults.
     "lights": {},

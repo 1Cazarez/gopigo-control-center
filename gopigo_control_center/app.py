@@ -11,6 +11,7 @@ from tkinter import messagebox, ttk
 import user_settings
 from dependencies import paramiko, pygame
 from tabs import (
+    AutopilotTabMixin,
     DashboardTabMixin,
     DriveTabMixin,
     EducationTabMixin,
@@ -51,6 +52,7 @@ def initial_geometry(root):
 
 class GoPiGoApp(
     DashboardTabMixin,
+    AutopilotTabMixin,
     ManualTabMixin,
     DriveTabMixin,
     SensorsMixin,
@@ -276,6 +278,8 @@ class GoPiGoApp(
         self.connect_btn.config(text="Connect")
         style_button(self.connect_btn, "success")
         # Put every start/stop button back to "Start", so nothing reads "Stop" for a service that's gone.
+        if self.nav_channel is not None:
+            self._autopilot_finished("Disconnected; the robot stops by itself.")
         self._on_jupyter_stopped()
         self._on_camera_stopped()
         self._dashboard_on_disconnect()
@@ -294,12 +298,14 @@ class GoPiGoApp(
 
         self.dashboard_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.manual_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.autopilot_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.jupyter_camera_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.wifi_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.education_tab = ttk.Frame(self.notebook, style="Card.TFrame")
 
         self.notebook.add(self.dashboard_tab, text="Dashboard")
         self.notebook.add(self.manual_tab, text="Manual Control")
+        self.notebook.add(self.autopilot_tab, text="Autopilot")
         self.notebook.add(self.jupyter_camera_tab, text="Jupyter & Camera")
         self.notebook.add(self.wifi_tab, text="Wi-Fi")
         self.notebook.add(self.education_tab, text="Modules")
@@ -308,7 +314,8 @@ class GoPiGoApp(
         self._build_jupyter_camera_tab()
         self._build_wifi_tab()
         self._build_education_tab()
-        self._build_dashboard_tab()  # last: it shows the camera status the Jupyter & Camera tab keeps
+        self._build_dashboard_tab()  # after Jupyter & Camera: it shows the camera status that tab keeps
+        self._build_autopilot_tab()  # after the Dashboard: it shares its camera views
 
     # ---------------- Status bar ----------------
     def _build_status_bar(self):

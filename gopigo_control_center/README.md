@@ -45,13 +45,16 @@ gopigo_control_center/
 ├── gamepad.py               reads game controllers through pygame/SDL
 ├── user_settings.py          saved settings (controller buttons, speed, light states)
 ├── constants.py             shared constants and helpers (venv path, login shell)
-├── dependencies.py           optional imports (paramiko, pygame)
+├── dependencies.py           optional imports (paramiko, pygame, Pillow, OpenCV)
+├── camera_view.py           live camera picture with face detection (shared by the Dashboard and Autopilot)
 ├── remote_scripts.py          scripts deployed onto the robot over SFTP
 ├── wifi.py                       nmcli commands + parsing for the Wi-Fi tab (no Tk, easy to test)
 ├── requirements.txt
 ├── lessons/                       course modules shown in the Modules tab (Markdown)
+├── models/                         YuNet face detection model (with its MIT LICENSE)
 └── tabs/
     ├── dashboard_tab.py          Dashboard (camera, sensors, controller driving and bindings)
+    ├── autopilot_tab.py          Autopilot: path grid, live picture, incident log
     ├── manual_tab.py             Manual Control: lays out the three sections below
     ├── drive_tab.py               on-screen driving buttons
     ├── sensors_panel.py           sensor panels (also on the Dashboard) and the telemetry stream behind them
@@ -64,6 +67,23 @@ gopigo_control_center/
 Each tab is a small mixin class; `GoPiGoApp` in `app.py` combines all of
 them, so every tab's methods end up on `self` as if they were written in
 one file, but each lives in its own module.
+
+## The Autopilot tab
+
+The driving runs on the robot (`NAVIGATOR_SCRIPT` in `remote_scripts.py`), so Wi-Fi lag can't get into
+its control loop. The app sends it one JSON line with the plan -- the cell centres to visit, in cm from
+the start -- then `ping` every half second, `face 1` / `face 0`, or `stop`; the navigator stops by
+itself if its input closes or the pings stop for two seconds. It answers in JSON lines (pose, step,
+sensors, vision, eyes, incident, log, stream, done).
+
+It moves with the motors' position control and keeps its position from the wheel encoders. Each leg
+is watched by the distance sensor (at the safety-stop distance) and, optionally, the camera: the floor's
+colour is learned at the start from the bottom of the picture, and anything just ahead that doesn't
+look like it counts as an obstacle. A blocked leg is detoured (sideways to the clearer side, past,
+back onto the line); if the obstacle sits on the target cell, the cell is skipped; if it's beyond the
+target, the robot just finishes the leg. The navigator holds the camera, so it also serves the live
+picture on port 8000, which the tab shows; face detection runs on the computer
+(`camera_view.py`, OpenCV's YuNet model) and its result goes back to the robot to colour the eyes.
 
 ## The Wi-Fi tab
 

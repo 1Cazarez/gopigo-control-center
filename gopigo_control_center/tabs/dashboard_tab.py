@@ -12,15 +12,14 @@ speed. These are fixed; the other buttons can be bound to actions -- lights, cam
 Controller Settings window. The bindings are saved by user_settings.py.
 """
 
-import io
 import threading
 import tkinter as tk
-import urllib.request
 from tkinter import messagebox, ttk
 
 import user_settings
 from constants import VENV_ACTIVATE, login_shell
-from dependencies import Image, ImageTk, pygame
+from camera_view import CameraView
+from dependencies import pygame
 from gamepad import STANDARD_BUTTONS, Gamepad, button_label, list_controllers
 from remote_scripts import (
     MOTOR_STREAM_C_SOURCE,
@@ -51,6 +50,8 @@ DRIVE_BUTTONS = {
     "rightshoulder": "Spin right (hold)",
 }
 DRIVE_HELP = "ZR gas · ZL brake/reverse · left stick steers · hold L/R to spin · right stick up/down sets top speed"
+DRIVE_EYES_YELLOW = (255, 160, 0)  # the safety stop is holding the robot back
+DRIVE_EYES_RED = (255, 0, 0)       # the camera sees a face
 SPIN_SHARE = 0.6   # spinning on the spot runs the wheels at this share of the top speed
 SPEED_RATE = 200   # deg/sec the top speed changes per second with the right stick pushed all the way
 
@@ -125,11 +126,9 @@ class DashboardTabMixin:
         self.shown_signal = "-"     # the turn signal last sent while driving
         self.top_speed_changing = False  # the right stick is changing the top speed
         self.top_speed = 0.0
-        self.camera_reader = None   # identifies the running frame reader; None stops it
-        self.camera_frame = None    # the newest decoded frame, waiting to be shown
-        self.camera_photo = None
-        self.camera_image_item = None
-        self.camera_size = (640, 480)
+        self.camera_views = []      # every live camera view, shown by the tick
+        self.dashboard_face = False  # the Dashboard camera currently sees a face
+        self.drive_eyes = None      # the eye color driving is showing (yellow / red), or None for the user's own
         s = self.ui_scale
 
         outer = ttk.Frame(self.dashboard_tab, style="Card.TFrame", padding=10)
@@ -148,9 +147,11 @@ class DashboardTabMixin:
         self.dash_camera_btn = style_button(tk.Button(head, text="Start Camera", command=self.toggle_camera_stream), "success")
         self.dash_camera_btn.pack(side="right")
         style_button(tk.Button(head, text="Reset", command=self.reset_camera), "warning").pack(side="right", padx=6)
-        self.camera_canvas = tk.Canvas(camera, bg="#12161d", highlightthickness=0, width=1, height=1)
-        self.camera_canvas.pack(fill="both", expand=True, pady=(6, 0))
-        self.camera_canvas.bind("<Configure>", self._on_camera_canvas_resize)
+        self.dash_camera = CameraView(
+            camera, self.root, idle_text="Camera off -- click Start Camera", on_face_change=self._on_dashboard_face
+        )
+        self.dash_camera.canvas.pack(fill="both", expand=True, pady=(6, 0))
+        self.camera_views.append(self.dash_camera)
         self.camera_status_var.trace_add("write", lambda *a: self._sync_camera_button())
 
         # -- Robot sensors --
@@ -216,7 +217,6 @@ class DashboardTabMixin:
             self.controller_status_var.set("pygame is not installed, so controllers can't be used. Run: pip install pygame")
         else:
             self.refresh_controllers()
-        self._draw_camera_placeholder()
         self.root.after(TICK_MS, self._dashboard_tick)
 
     def _save_setting(self, key, value):
@@ -227,7 +227,8 @@ class DashboardTabMixin:
     def _dashboard_tick(self):
         try:
             self._poll_controller()
-            self._show_camera_frame()
+            for view in self.camera_views:
+                view.tick()
         except Exception as e:
             self._set_status(f"Dashboard error: {e}")
         self.root.after(TICK_MS, self._dashboard_tick)
@@ -378,11 +379,17 @@ class DashboardTabMixin:
         self.controller_settings_win = ControllerSettingsWindow(self)
 
     # ---------------- Driving ----------------
-    def toggle_driving(self):
+    def toggle_driving(self, waited=0):
         if self.controller_active or self.motor_channel is not None:
             self._stop_driving("Stopped driving.")
             return
         if self.drive_starting:
+            return
+        if self.nav_channel is not None:  # take over from the autopilot once it has let go of the motors
+            if waited == 0:
+                self.stop_autopilot("The controller took over.")
+            if waited < 20:
+                self.root.after(250, lambda: self.toggle_driving(waited + 1))
             return
         if pygame is None:
             messagebox.showerror("Missing dependency", "Install pygame first:\npip install pygame")
@@ -440,6 +447,8 @@ class DashboardTabMixin:
         self.motor_channel = channel
         self.controller_active = True
         self.shown_signal = "-"
+        self.drive_eyes = None
+        self._update_drive_eyes()
         self.drive_btn.config(text="Stop Driving", state="normal")
         style_button(self.drive_btn, "danger", big=True)
         self.controller_status_var.set(f"Driving ({driver}).")
@@ -496,6 +505,7 @@ class DashboardTabMixin:
                 pass
             self._record_lights(left_blinker=False, right_blinker=False)
             self.hazards_on = False
+        self._restore_eyes_after_driving()
         self.drive_btn.config(text="Start Driving", state="normal")
         style_button(self.drive_btn, "success", big=True)
         self.motor_dps_var.set("Motors: --")
@@ -503,6 +513,7 @@ class DashboardTabMixin:
 
     def emergency_stop(self):
         self._stop_driving("Emergency stopped.")
+        self.stop_autopilot("Emergency stop.")
         if self.ssh_client is not None:
             self._drive_cmd("gpg.stop()", "-")
 
@@ -519,76 +530,43 @@ class DashboardTabMixin:
             style_button(self.dash_camera_btn, "success")
 
     def _dashboard_camera_ready(self, url):
-        """Called once the robot's camera stream is up: start pulling its frames into the Dashboard."""
-        if Image is None:
-            self._draw_camera_placeholder(
-                "Install Pillow to see the camera here: pip install Pillow\n(or use Open in Browser on the Jupyter & Camera tab)"
-            )
-            return
-        token = object()
-        self.camera_reader = token
-        threading.Thread(target=self._camera_frames_loop, args=(url, token), daemon=True).start()
+        """Called once the robot's camera stream is up: show it."""
+        self.dash_camera.start(url)
 
     def _dashboard_camera_stopped(self):
-        self.camera_reader = None
-        self.camera_frame = None
-        self._draw_camera_placeholder()
+        self.dash_camera.stop()
 
-    def _camera_frames_loop(self, url, token):
-        """Read the MJPEG stream: each frame is a small header block with a Content-Length, then the JPEG."""
-        try:
-            with urllib.request.urlopen(url + "stream.mjpg", timeout=10) as stream:
-                while self.camera_reader is token:
-                    length = None
-                    while True:
-                        line = stream.readline()
-                        if not line:
-                            raise ConnectionError("the stream ended")
-                        line = line.strip()
-                        if line.lower().startswith(b"content-length:"):
-                            length = int(line.split(b":", 1)[1])
-                        elif not line and length:
-                            break
-                    frame = Image.open(io.BytesIO(stream.read(length)))
-                    frame.draft("RGB", self.camera_size)  # lets the JPEG decoder skip detail we won't show
-                    frame.thumbnail(self.camera_size, Image.Resampling.BILINEAR)
-                    self.camera_frame = frame
-        except Exception as e:
-            error = str(e)
-            if self.camera_reader is token:
-                self.camera_reader = None
-                self.root.after(0, lambda: self._draw_camera_placeholder(f"Lost the camera picture: {error}"))
+    def _on_dashboard_face(self, present, snapshot):
+        self.dashboard_face = present
+        if present:
+            self._set_status("Face in view on the Dashboard camera.")
+        self._update_drive_eyes()
 
-    def _show_camera_frame(self):
-        frame, self.camera_frame = self.camera_frame, None
-        if frame is None or self.camera_reader is None:
+    # ---------------- Eyes while driving ----------------
+    def _update_drive_eyes(self):
+        """While driving with the controller, the eyes show yellow when the safety stop is holding the robot
+        back and red when the camera sees a face; otherwise they're whatever the user set."""
+        if not self.controller_active or self.motor_channel is None:
             return
-        self.camera_photo = ImageTk.PhotoImage(frame)  # keep a reference, or Tk shows nothing
-        w, h = self.camera_size
-        if self.camera_image_item is None:
-            self.camera_canvas.delete("all")
-            self.camera_image_item = self.camera_canvas.create_image(w / 2, h / 2, image=self.camera_photo)
-        else:
-            self.camera_canvas.coords(self.camera_image_item, w / 2, h / 2)
-            self.camera_canvas.itemconfig(self.camera_image_item, image=self.camera_photo)
+        color = DRIVE_EYES_YELLOW if self.obstacle_close else DRIVE_EYES_RED if self.dashboard_face else None
+        if color == self.drive_eyes:
+            return
+        self.drive_eyes = color
+        if color is None:
+            color = self.led_colors["left_eye"] if self.light_on["left_eye"] else OFF
+        r, g, b = color
+        try:
+            self.motor_channel.send(f"LED,3,{r},{g},{b}\n")  # 3 = both eyes
+        except Exception:
+            pass
 
-    def _on_camera_canvas_resize(self, event):
-        self.camera_size = (max(event.width, 1), max(event.height, 1))
-        if self.camera_image_item is None:
-            self._draw_camera_placeholder(self._camera_placeholder_text)
-
-    _camera_placeholder_text = None
-
-    def _draw_camera_placeholder(self, text=None):
-        self._camera_placeholder_text = text
-        canvas = self.camera_canvas
-        canvas.delete("all")
-        self.camera_image_item = None
-        w, h = self.camera_size
-        canvas.create_text(
-            w / 2, h / 2, text=text or "Camera off -- click Start Camera", fill=MUTED, font=FONT_MONO_SMALL,
-            width=max(w - 40, 100), justify="center",
-        )
+    def _restore_eyes_after_driving(self):
+        if self.drive_eyes is None:
+            return
+        self.drive_eyes = None
+        if self.ssh_client is not None:
+            on = self.light_on["left_eye"] or self.light_on["right_eye"]
+            self._set_lights({key: self._on_color(key) if on else OFF for key in ("left_eye", "right_eye")}, "Eyes back")
 
     # ---------------- Disconnect ----------------
     def _dashboard_on_disconnect(self):

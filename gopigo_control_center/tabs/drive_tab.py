@@ -7,7 +7,7 @@ from tkinter import ttk
 from constants import VENV_ACTIVATE, login_shell
 from theme import CARD_BG, style_button
 
-# Safety stop: with it on, once something is within the stop distance (a setting, 10 cm by default), forward
+# Safety stop: with it on, once something is within the stop distance (a setting, 20 cm by default), forward
 # driving is blocked until it's this much farther away, so a reading hovering at the limit doesn't flick it on
 # and off.
 OBSTACLE_CLEAR_MARGIN_CM = 3
@@ -68,6 +68,8 @@ class DriveTabMixin:
         if not self._require_connection():
             return
         if signal is not None:  # a move from the drive buttons
+            if self.nav_channel is not None:
+                self.stop_autopilot("You took over with the drive buttons.")
             if gpg_call == "gpg.forward()" and self.obstacle_close:
                 self.drive_status_var.set("Something is too close ahead to drive forward. Back up or turn first.")
                 return
@@ -120,8 +122,13 @@ class DriveTabMixin:
         on = self.safety_stop_var.get()
         self._save_setting("safety_stop", on)
         if not on:
-            self.obstacle_close = False
+            self._clear_obstacle()
         self._set_status(f"Safety stop {'on' if on else 'off'}.")
+
+    def _clear_obstacle(self):
+        if self.obstacle_close:
+            self.obstacle_close = False
+            self._update_drive_eyes()
 
     def _check_obstacle(self, mm):
         """Called with each distance reading (mm, or None without a distance sensor). With the safety stop on,
@@ -129,13 +136,15 @@ class DriveTabMixin:
         clear again."""
         stop_cm = self.settings["obstacle_stop_cm"]
         if not self.safety_stop_var.get() or mm is None:
-            self.obstacle_close = False  # turned off, or no distance sensor
+            self._clear_obstacle()  # turned off, or no distance sensor
             return
         if mm <= 0:
             return  # a failed reading: keep the last decision
         cm = mm / 10
         was_close = self.obstacle_close
         self.obstacle_close = cm <= stop_cm + (OBSTACLE_CLEAR_MARGIN_CM if was_close else 0)
+        if self.obstacle_close != was_close:
+            self._update_drive_eyes()
         if self.obstacle_close and not was_close:
             message = f"Safety stop: something {cm:.0f} cm ahead."
             if self.manual_forward:

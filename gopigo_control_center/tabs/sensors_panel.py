@@ -200,7 +200,7 @@ class SensorsMixin:
         if channel is not None and self.telemetry_channel is not channel:
             return  # that reader was already replaced
         old, self.telemetry_channel = self.telemetry_channel, None
-        self.obstacle_close = False  # without readings there's nothing to go on
+        self._clear_obstacle()  # without readings there's nothing to go on
         if old is not None:
             try:
                 old.close()

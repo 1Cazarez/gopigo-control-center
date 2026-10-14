@@ -1,3 +1,4 @@
+from .autopilot_tab import AutopilotTabMixin
 from .dashboard_tab import DashboardTabMixin
 from .drive_tab import DriveTabMixin
 from .education_tab import EducationTabMixin
@@ -8,6 +9,7 @@ from .sensors_panel import SensorsMixin
 from .wifi_tab import WifiTabMixin
 
 __all__ = [
+    "AutopilotTabMixin",
     "DashboardTabMixin",
     "DriveTabMixin",
     "EducationTabMixin",

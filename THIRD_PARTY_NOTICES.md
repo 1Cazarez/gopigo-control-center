@@ -40,3 +40,12 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
+
+## YuNet face detection model
+
+Face detection uses the YuNet model (`face_detection_yunet_2023mar.onnx`) from the OpenCV Model Zoo,
+bundled as [`gopigo_control_center/models/face_detection_yunet_2023mar.onnx`](gopigo_control_center/models/face_detection_yunet_2023mar.onnx).
+It is licensed under the MIT License (Copyright (c) 2020 Shiqi Yu); the full text is in
+[`gopigo_control_center/models/LICENSE-yunet`](gopigo_control_center/models/LICENSE-yunet).
+
+- Source: <https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet>

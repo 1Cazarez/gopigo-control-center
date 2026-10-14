@@ -4,7 +4,7 @@ Imported once here and shared across the app so every module sees the same
 "None if missing" fallback instead of each file guessing on its own.
 
 Install them with:
-    pip install paramiko pygame Pillow
+    pip install paramiko pygame Pillow opencv-python
 """
 
 import os
@@ -26,6 +26,13 @@ except ImportError:
 
 # Pillow decodes the camera's JPEG frames for the Dashboard; without it the Dashboard just says so.
 try:
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageDraw, ImageTk
 except ImportError:
-    Image = ImageTk = None
+    Image = ImageDraw = ImageTk = None
+
+# OpenCV finds faces in the camera picture (camera_view.py); without it there's just no face detection.
+try:
+    import cv2
+    import numpy
+except ImportError:
+    cv2 = numpy = None
