@@ -20,9 +20,12 @@ DEFAULTS = {
         "dpdown": "lights_off",
         "east": "camera",  # A
         "back": "sensors",
+        "guide": "safety",  # Home
     },
     "max_speed": 250,
     "deadzone": 0.15,
+    "safety_stop": True,     # don't drive forward into anything closer than obstacle_stop_cm
+    "obstacle_stop_cm": 10,
     # Which board lights are on and their colors, as last set from the app (the board can't report them),
     # and the robot's boot ID when they were set: after a reboot they're back to the robot's defaults.
     "lights": {},

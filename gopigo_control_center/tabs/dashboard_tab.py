@@ -34,6 +34,7 @@ from remote_scripts import (
 from theme import CARD_BG, FONT_MONO_SMALL, MUTED, style_button
 from widgets import ControllerView
 
+from .drive_tab import MAX_STOP_CM, MIN_STOP_CM
 from .lights_tab import BLINKER_ON, OFF
 from .sensors_panel import SENSORS_OFF
 
@@ -54,8 +55,11 @@ SPIN_SHARE = 0.6   # spinning on the spot runs the wheels at this share of the t
 SPEED_RATE = 200   # deg/sec the top speed changes per second with the right stick pushed all the way
 
 
-def racing_drive(sticks, pressed, top_speed, deadzone):
+def racing_drive(sticks, pressed, top_speed, deadzone, block_forward=False):
     """(left wheel, right wheel, turn signal) in deg/sec for the racing controls.
+
+    block_forward stops the gas from driving forward (something is too close ahead); reversing and spinning
+    still work, to get away from it.
 
     Steering works like a car: it bends the path only while the robot moves, and at full lock the inner wheel
     stops. The turn signal follows the steering, so reversing with the stick to the right still signals right.
@@ -66,6 +70,8 @@ def racing_drive(sticks, pressed, top_speed, deadzone):
         return (-spin, spin, "L") if spin_left else (spin, -spin, "R")
 
     forward = (("zr" in pressed) - ("zl" in pressed)) * top_speed
+    if block_forward and forward > 0:
+        forward = 0
     steer = sticks[0] if abs(sticks[0]) >= deadzone else 0.0
     if forward == 0:
         return 0, 0, "-"
@@ -84,7 +90,7 @@ SHORT_BUTTONS = {
 SHORT_ACTIONS = {
     "drive": "Drive on/off", "estop": "E-stop", "speed_up": "Faster", "speed_down": "Slower",
     "left_blinker": "L blinker", "right_blinker": "R blinker", "hazards": "Hazards", "eyes": "Eyes on/off",
-    "eye_color": "Eye color", "lights_off": "Lights off", "camera": "Camera", "sensors": "Sensors",
+    "eye_color": "Eye color", "lights_off": "Lights off", "camera": "Camera", "sensors": "Sensors", "safety": "Safety stop",
 }
 LEGEND_DRIVING = [("ZR", "Gas"), ("ZL", "Brake/rev"), ("L/R", "Spin"), ("L-stick", "Steer"), ("R-stick", "Top speed")]
 LEGEND_COLUMNS = 3
@@ -105,6 +111,7 @@ ACTIONS = {
     "lights_off": "All lights off",
     "camera": "Camera on/off",
     "sensors": "Sensors on/off",
+    "safety": "Safety stop on/off",
 }
 
 
@@ -180,6 +187,7 @@ class DashboardTabMixin:
         style_button(tk.Button(drive, text="EMERGENCY STOP", command=self.emergency_stop), "danger", big=True).pack(
             side="left", padx=10
         )
+        self._safety_stop_checkbox(drive).pack(side="left")
 
         speed = ttk.Frame(side, style="Card.TFrame")
         speed.pack(fill="x")
@@ -298,6 +306,7 @@ class DashboardTabMixin:
             "lights_off": self._dashboard_lights_off,
             "camera": self.toggle_camera_stream,
             "sensors": self.toggle_sensors,
+            "safety": self._toggle_safety_stop,
         }
         handler = handlers.get(action)
         if handler is not None:
@@ -458,7 +467,7 @@ class DashboardTabMixin:
             return
 
         left, right, signal = racing_drive(
-            sticks, pressed, self.controller_max_speed_var.get(), self.settings["deadzone"]
+            sticks, pressed, self.controller_max_speed_var.get(), self.settings["deadzone"], self.obstacle_close
         )
 
         line = f"{left},{right}"
@@ -631,6 +640,18 @@ class ControllerSettingsWindow:
         ).pack(anchor="w")
         ttk.Label(side, text="(how far a stick must move before the robot does)", style="CardMuted.TLabel").pack(anchor="w")
 
+        ttk.Label(side, text="Safety stop distance (cm):", style="Card.TLabel").pack(anchor="w", pady=(12, 0))
+        self.obstacle_var = tk.IntVar(value=app.settings["obstacle_stop_cm"])
+        tk.Scale(
+            side, from_=MIN_STOP_CM, to=MAX_STOP_CM, orient="horizontal", variable=self.obstacle_var,
+            length=int(200 * app.ui_scale), bg=CARD_BG, highlightthickness=0, troughcolor="#e2e7ee", bd=0,
+            command=lambda v: app._set_stop_distance(int(float(v))),
+        ).pack(anchor="w")
+        app._safety_stop_checkbox(side).pack(anchor="w")
+        ttk.Label(
+            side, text="(no driving forward closer than this; needs the sensors on)", style="CardMuted.TLabel",
+        ).pack(anchor="w")
+
         style_button(tk.Button(side, text="Reset to Defaults", command=self._reset), "neutral").pack(anchor="w", pady=(16, 0))
 
         self.summary_var = tk.StringVar()
@@ -674,6 +695,8 @@ class ControllerSettingsWindow:
         self.app._save_setting("bindings", dict(defaults["bindings"]))
         self.app._save_setting("deadzone", defaults["deadzone"])
         self.deadzone_var.set(defaults["deadzone"])
+        self.app._set_stop_distance(defaults["obstacle_stop_cm"])
+        self.obstacle_var.set(defaults["obstacle_stop_cm"])
         self.select(self.selected)
         self._refresh_summary()
         self.app._refresh_controls_legend()

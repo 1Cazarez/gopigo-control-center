@@ -74,6 +74,10 @@ class GoPiGoApp(
         self.motor_channel = None
         self.controller_active = False
 
+        # Obstacle stop (see drive_tab.py): is something within the stop distance, and is Manual Drive going forward?
+        self.obstacle_close = False
+        self.manual_forward = False
+
         # JupyterLab launch state
         self.jupyter_channel = None
         self.jupyter_url = None
@@ -91,6 +95,7 @@ class GoPiGoApp(
             except Exception:
                 pass
 
+        self._init_safety_stop()
         self._build_connection_bar()
         self._build_tabs()
         self._build_status_bar()

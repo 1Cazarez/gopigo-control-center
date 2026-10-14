@@ -5,7 +5,13 @@ import tkinter as tk
 from tkinter import ttk
 
 from constants import VENV_ACTIVATE, login_shell
-from theme import style_button
+from theme import CARD_BG, style_button
+
+# Safety stop: with it on, once something is within the stop distance (a setting, 10 cm by default), forward
+# driving is blocked until it's this much farther away, so a reading hovering at the limit doesn't flick it on
+# and off.
+OBSTACLE_CLEAR_MARGIN_CM = 3
+MIN_STOP_CM, MAX_STOP_CM = 5, 40
 
 
 class DriveTabMixin:
@@ -48,16 +54,24 @@ class DriveTabMixin:
             side="left", padx=6
         )
 
+        self._safety_stop_checkbox(wrap).grid(row=5, column=0, columnspan=3, pady=(0, 6))
+
         self.drive_status_var = tk.StringVar(value="")
         ttk.Label(wrap, textvariable=self.drive_status_var, style="CardMuted.TLabel").grid(
-            row=5, column=0, columnspan=3
+            row=6, column=0, columnspan=3
         )
         return wrap
 
-    def _drive_cmd(self, gpg_call, signal=None):
-        """signal: the blinker to show with this move -- "L", "R" or "-" (none) -- or None to leave them alone."""
+    def _drive_cmd(self, gpg_call, signal=None, note=None):
+        """signal: the blinker to show with this move -- "L", "R" or "-" (none) -- or None to leave them alone.
+        note: what to show once it's sent, instead of the command."""
         if not self._require_connection():
             return
+        if signal is not None:  # a move from the drive buttons
+            if gpg_call == "gpg.forward()" and self.obstacle_close:
+                self.drive_status_var.set("Something is too close ahead to drive forward. Back up or turn first.")
+                return
+            self.manual_forward = gpg_call == "gpg.forward()"
         # Every press runs a new EasyGoPiGo3, which starts at its default speed, so apply ours first.
         snippet = f"import easygopigo3 as easy; gpg = easy.EasyGoPiGo3(); gpg.set_speed({self.drive_speed}); {gpg_call}"
         if signal is not None and self.turn_signals_var.get():
@@ -69,12 +83,68 @@ class DriveTabMixin:
         def worker():
             try:
                 self.ssh_client.exec_command(login_shell(command))
-                self.root.after(0, lambda: self.drive_status_var.set(f"Sent: {gpg_call}"))
+                self.root.after(0, lambda: self.drive_status_var.set(note or f"Sent: {gpg_call}"))
             except Exception as e:
                 error = str(e)
                 self.root.after(0, lambda: self.drive_status_var.set(f"Error: {error}"))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ---------------- Safety stop ----------------
+    def _init_safety_stop(self):
+        """Called once at startup, before the tabs are built."""
+        self.settings["obstacle_stop_cm"] = max(MIN_STOP_CM, min(MAX_STOP_CM, int(self.settings["obstacle_stop_cm"])))
+        self.safety_stop_var = tk.BooleanVar(value=bool(self.settings["safety_stop"]))
+        self.safety_label_var = tk.StringVar()
+        self.safety_stop_var.trace_add("write", lambda *a: self._on_safety_toggled())
+        self._refresh_safety_label()
+
+    def _safety_stop_checkbox(self, parent):
+        """A Safety stop checkbox in parent (not yet placed). All of them share one setting."""
+        return tk.Checkbutton(
+            parent, textvariable=self.safety_label_var, variable=self.safety_stop_var,
+            bg=CARD_BG, activebackground=CARD_BG, highlightthickness=0,
+        )
+
+    def _refresh_safety_label(self):
+        self.safety_label_var.set(f"Safety stop ({self.settings['obstacle_stop_cm']} cm)")
+
+    def _set_stop_distance(self, cm):
+        self._save_setting("obstacle_stop_cm", cm)
+        self._refresh_safety_label()
+
+    def _toggle_safety_stop(self):
+        self.safety_stop_var.set(not self.safety_stop_var.get())
+
+    def _on_safety_toggled(self):
+        on = self.safety_stop_var.get()
+        self._save_setting("safety_stop", on)
+        if not on:
+            self.obstacle_close = False
+        self._set_status(f"Safety stop {'on' if on else 'off'}.")
+
+    def _check_obstacle(self, mm):
+        """Called with each distance reading (mm, or None without a distance sensor). With the safety stop on,
+        within the stop distance: stop a forward Manual Drive move and block forward driving until the way is
+        clear again."""
+        stop_cm = self.settings["obstacle_stop_cm"]
+        if not self.safety_stop_var.get() or mm is None:
+            self.obstacle_close = False  # turned off, or no distance sensor
+            return
+        if mm <= 0:
+            return  # a failed reading: keep the last decision
+        cm = mm / 10
+        was_close = self.obstacle_close
+        self.obstacle_close = cm <= stop_cm + (OBSTACLE_CLEAR_MARGIN_CM if was_close else 0)
+        if self.obstacle_close and not was_close:
+            message = f"Safety stop: something {cm:.0f} cm ahead."
+            if self.manual_forward:
+                self.manual_forward = False
+                self._drive_cmd("gpg.stop()", "-", note=message)
+            if self.controller_active:
+                self.controller_status_var.set(f"{message} Forward is blocked -- reverse or spin away.")
+        elif was_close and not self.obstacle_close and self.controller_active:
+            self.controller_status_var.set("The way ahead is clear.")
 
     def _set_speed(self):
         self.drive_speed = self.speed_var.get()

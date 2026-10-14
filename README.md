@@ -8,6 +8,9 @@ the robot over your network. Tabs:
   what you press. Drive with a Nintendo Switch Pro Controller (or Joy-Con, or another gamepad) using
   racing controls (**Start Driving** also starts the camera and sensors): **ZR** gas, **ZL** brake/reverse, **left stick** steers (while moving, like a car),
   hold **L**/**R** to spin on the spot, and the **right stick** up/down raises or lowers the top speed.
+  **Safety stop** (a checkbox on the Dashboard and Manual Control, or the Home button): with the sensors
+  on, the robot won't drive forward into anything closer than 10 cm (the distance is set in Controller
+  Settings); it can still reverse or spin away.
   Choose what the other buttons do -- blinkers, hazard lights, eye colors (X steps through them, then
   off), camera and more -- in **Controller Settings**; a legend on the Dashboard lists what every
   button does, and a drawing of the robot shows which lights should be on. Your choices are saved in

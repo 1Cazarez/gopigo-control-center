@@ -194,11 +194,13 @@ class SensorsMixin:
             return  # stopped since this reading arrived
         for panel in self.sensor_panels:
             panel.show(reading)
+        self._check_obstacle(reading.get("distance_mm"))
 
     def _stop_telemetry(self, message, channel=None):
         if channel is not None and self.telemetry_channel is not channel:
             return  # that reader was already replaced
         old, self.telemetry_channel = self.telemetry_channel, None
+        self.obstacle_close = False  # without readings there's nothing to go on
         if old is not None:
             try:
                 old.close()

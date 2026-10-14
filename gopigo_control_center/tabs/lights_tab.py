@@ -123,15 +123,17 @@ class LightsTabMixin:
 
     def _check_robot_boot(self):
         """After connecting: if the robot has rebooted since the lights were last set, they're back to how a
-        freshly booted robot looks (only the Wi-Fi LED, which the robot itself lights, is on)."""
+        freshly booted robot looks (only the Wi-Fi LED, which the robot itself lights, is on). Either way the
+        eyes start off."""
         def worker():
             try:
                 _, stdout, _ = self.ssh_client.exec_command("cat /proc/sys/kernel/random/boot_id", timeout=10)
                 boot_id = stdout.read().decode(errors="replace").strip()
             except Exception:
-                return
+                boot_id = ""
             if boot_id:
                 self.root.after(0, lambda: self._on_robot_boot_id(boot_id))
+            self.root.after(0, self._eyes_off_at_start)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -140,6 +142,10 @@ class LightsTabMixin:
             return
         self.settings["robot_boot_id"] = boot_id
         self._record_lights(**{key: key in LIGHTS_ON_AT_BOOT for key in LIGHTS})
+
+    def _eyes_off_at_start(self):
+        if self.ssh_client is not None:
+            self._set_lights({"left_eye": OFF, "right_eye": OFF}, "Eyes off")
 
     def _pick_led_color(self, key):
         rgb, _ = colorchooser.askcolor(
